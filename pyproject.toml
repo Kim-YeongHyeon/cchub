@@ -1,11 +1,11 @@
 [project]
 name = "cchub"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = ["textual>=8,<9"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pytest-asyncio>=1"]
 
 [project.scripts]
 cchub = "cchub.cli:main"
@@ -16,3 +16,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

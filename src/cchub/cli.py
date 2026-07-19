@@ -148,6 +148,12 @@ def cmd_reindex(_args) -> int:
     return 0
 
 
+def cmd_tui(_args) -> int:
+    from cchub.tui.app import run_tui
+    run_tui()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="cchub", description="멀티 서버 Claude Code 세션 허브")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -171,11 +177,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("query")
 
     sub.add_parser("reindex", help="캐시에서 인덱스 재구축")
+    sub.add_parser("tui", help="터미널 UI 실행")
 
     args = ap.parse_args(argv)
     handler = {
         "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "send": cmd_send,
-        "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex,
+        "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex, "tui": cmd_tui,
     }[args.cmd]
     try:
         return handler(args)
