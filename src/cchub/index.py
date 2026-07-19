@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS sessions(
     PRIMARY KEY (server, session_id)
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS messages USING fts5(
-    server, session_id, role, ts, text
+    server UNINDEXED, session_id UNINDEXED, role UNINDEXED, ts UNINDEXED, text
 );
 """
 
@@ -44,7 +44,19 @@ _ROW_COLS = "server, session_id, project, title, first_prompt, first_ts, last_ts
 class SessionIndex:
     def __init__(self, db_path: Path | str):
         self.db = sqlite3.connect(db_path)
+        self._migrate_if_needed()
         self.db.executescript(_SCHEMA)
+
+    def _migrate_if_needed(self) -> None:
+        """구버전 fts5 스키마(메타데이터 컬럼까지 인덱싱)를 감지하면 비우고
+        재구축을 유도한다. 다음 sync에서 처음부터 다시 인덱싱된다."""
+        row = self.db.execute(
+            "SELECT sql FROM sqlite_master WHERE name='messages'"
+        ).fetchone()
+        if row and "UNINDEXED" not in row[0]:
+            self.db.execute("DROP TABLE messages")
+            self.db.execute("DROP TABLE IF EXISTS sessions")  # bytes_indexed 리셋 → 재인덱싱 유도
+            self.db.commit()
 
     def index_file(self, server: str, project: str, path: Path) -> int:
         """path에서 아직 읽지 않은 바이트만 파싱해 반영한다. 반영한 message 수 반환."""

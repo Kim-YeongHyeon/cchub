@@ -62,6 +62,10 @@ claude_dir = "~/.claude"      # 원격의 claude 홈 (기본값)
   위해 시스템 임시 디렉터리(`$TMPDIR` 또는 `/tmp`) 아래
   `cchub-cm-<uid>-<hash>/`에 둔다
 
+기존 `index.db`가 구버전 스키마(메타데이터 컬럼까지 FTS 인덱싱하던 버전)로
+남아 있으면 여는 즉시 자동으로 비워지며, 다음 `cchub sync`(또는
+`cchub reindex`)에서 새 스키마로 재구축된다.
+
 ## 제약 사항
 
 - 각 원격 서버에는 `tmux`와 `rsync`, 키 기반 SSH 접속이 준비돼 있어야 한다.

@@ -1,4 +1,5 @@
 import shutil
+import sqlite3
 from pathlib import Path
 
 from cchub.index import SessionIndex
@@ -94,3 +95,56 @@ def test_search_survives_fts_syntax_hazards(tmp_path):
     for q in ["O'Brien", "NUMA AND", 'unbalanced "quote', "-"]:
         idx.search(q)  # 예외만 안 나면 됨
     assert idx.search('NUMA"') != []
+
+
+def test_search_matches_text_only_not_metadata(tmp_path):
+    idx, p = make(tmp_path)
+    idx.index_file("srv1", "-home-u-proj", p)
+    assert idx.search("srv1") == []      # 서버명은 매칭 안 됨
+    assert idx.search("user") == []      # role은 매칭 안 됨
+    assert idx.search("s-1") == []       # 세션ID는 매칭 안 됨
+    assert idx.search("NUMA")            # 본문은 매칭됨
+
+
+def test_old_schema_index_is_migrated_on_open(tmp_path):
+    db_path = tmp_path / "index.db"
+    # 구버전 DDL(메타데이터 컬럼까지 인덱싱)로 수동 생성 + 더미 행 삽입
+    old_conn = sqlite3.connect(db_path)
+    old_conn.executescript(
+        """
+        CREATE TABLE sessions(
+            server TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            project TEXT NOT NULL,
+            path TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            first_prompt TEXT NOT NULL DEFAULT '',
+            first_ts TEXT NOT NULL DEFAULT '',
+            last_ts TEXT NOT NULL DEFAULT '',
+            last_role TEXT NOT NULL DEFAULT '',
+            bytes_indexed INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (server, session_id)
+        );
+        CREATE VIRTUAL TABLE messages USING fts5(
+            server, session_id, role, ts, text
+        );
+        """
+    )
+    old_conn.execute(
+        "INSERT INTO sessions(server, session_id, project, path, bytes_indexed)"
+        " VALUES('srv1','s-1','-home-u-proj','/x',999)"
+    )
+    old_conn.execute(
+        "INSERT INTO messages VALUES('srv1','s-1','user','2026-07-01T00:00:00.000Z','old text')"
+    )
+    old_conn.commit()
+    old_conn.close()
+
+    idx = SessionIndex(db_path)  # 마이그레이션 트리거
+    assert idx.get_session("srv1", "s-1") is None  # 구 데이터는 비워짐
+    assert idx.list_sessions() == []
+
+    p = tmp_path / "s-1.jsonl"
+    shutil.copy(FIXTURE, p)
+    assert idx.index_file("srv1", "-home-u-proj", p) == 3  # 재인덱싱 가능
+    assert idx.search("srv1") == []  # 새 스키마도 메타데이터 매칭 안 됨
