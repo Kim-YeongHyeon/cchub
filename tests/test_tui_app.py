@@ -3,9 +3,11 @@ from pathlib import Path
 from cchub.config import Config
 from cchub.index import SessionIndex
 from cchub.sessions import LiveSession
+from cchub.ssh import RunResult
 from cchub.tui.app import CchubApp
 from cchub.tui.data import ServerSnapshot
-from textual.widgets import Tree
+from conftest import FakeRemote
+from textual.widgets import RichLog, Tree
 
 
 def make_app(tmp_path: Path) -> CchubApp:
@@ -113,3 +115,46 @@ async def test_load_sessions_survives_collect_exception(tmp_path, monkeypatch):
             pass  # Worker may be cancelled; we just care the app survives
         await pilot.pause()
         assert app.is_running   # 앱이 죽지 않음
+
+
+def make_app_with_remote(tmp_path, fake):
+    app = make_app(tmp_path)
+    app.remote_factory = lambda h: fake
+    # cfg에 서버가 있어야 remote_factory가 조회됨
+    from cchub.config import ServerConfig
+    app.cfg.servers["srv1"] = ServerConfig(name="srv1", host="u@h")
+    return app
+
+
+async def test_live_detail_shows_capture(tmp_path):
+    fake = FakeRemote({"tmux": RunResult(0, "화면 캡처 내용\n", "")})
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap())
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        app.show_detail()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert any(c[:2] == ["tmux", "capture-pane"] for c in fake.calls)
+
+
+async def test_transcript_mode_reads_index_not_tmux(tmp_path):
+    fake = FakeRemote()
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap())
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        await pilot.press("t")           # transcript 모드 토글
+        await app.workers.wait_for_complete()
+        assert app.transcript_mode is True
+        assert not any(c[:2] == ["tmux", "capture-pane"] for c in fake.calls)
+
+
+async def test_follow_toggle_flips_state(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        assert app.follow_on is False
+        await pilot.press("f")
+        assert app.follow_on is True
+        await pilot.press("f")
+        assert app.follow_on is False

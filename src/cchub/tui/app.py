@@ -8,6 +8,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Input, RichLog, Static, Tree
 
+from cchub import tmux
 from cchub.config import Config, cchub_dir, load_config
 from cchub.index import SessionIndex
 from cchub.sessions import LiveSession
@@ -50,6 +51,9 @@ class CchubApp(App):
     def on_mount(self) -> None:
         self.selected: LiveSession | None = None
         self.snapshots: dict[str, ServerSnapshot] = {}
+        self.transcript_mode = False
+        self.follow_on = False
+        self._follow_timer = self.set_interval(2, self._follow_tick, pause=True)
         self.set_interval(self.cfg.sync_interval, self.action_refresh)
         self.action_refresh()
 
@@ -104,15 +108,57 @@ class CchubApp(App):
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         if event.node.data is not None:
             self.selected = event.node.data
+        self.show_detail()
+
+    def show_detail(self) -> None:
+        if self.selected is not None:
+            self.refresh_detail()
+
+    @work(thread=True, exclusive=True, group="detail", exit_on_error=False)
+    def refresh_detail(self) -> None:
+        ls = self.selected
+        if ls is None:
+            return
+        if self.transcript_mode:
+            rows = (
+                self.index.tail(ls.server, ls.session_id, limit=30)
+                if ls.session_id else []
+            )
+            text = "\n".join(f"── {role} {ts}\n{body}" for role, ts, body in rows) \
+                   or "(transcript 없음 — 동기화 대기)"
+        else:
+            try:
+                remote = self.remote_factory(self.cfg.servers[ls.server].host)
+                text = tmux.capture(remote, ls.pane_id, lines=200) or "(캡처 실패)"
+            except Exception as e:  # noqa: BLE001
+                self.call_from_thread(self.notify, f"상세 조회 실패: {e}", severity="error")
+                return
+        self.call_from_thread(self._write_detail, text)
+
+    def _write_detail(self, text: str) -> None:
+        log = self.query_one("#detail", RichLog)
+        log.clear()
+        log.write(text)
+
+    def _follow_tick(self) -> None:
+        if self.follow_on and not self.transcript_mode:
+            self.show_detail()
 
     def action_toggle_stats(self) -> None:
         pass
 
     def action_toggle_follow(self) -> None:
-        pass
+        self.follow_on = not self.follow_on
+        if self.follow_on:
+            self._follow_timer.resume()
+        else:
+            self._follow_timer.pause()
+        self.notify(f"팔로우 {'ON' if self.follow_on else 'OFF'}")
 
     def action_toggle_transcript(self) -> None:
-        pass
+        self.transcript_mode = not self.transcript_mode
+        self.notify(f"transcript 모드 {'ON' if self.transcript_mode else 'OFF(live)'}")
+        self.show_detail()
 
 
 def run_tui() -> None:
