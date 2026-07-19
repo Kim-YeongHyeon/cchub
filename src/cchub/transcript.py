@@ -22,7 +22,7 @@ def _text_of(content: object) -> str:
         return "\n".join(
             b.get("text", "")
             for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
+            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
         )
     return ""
 

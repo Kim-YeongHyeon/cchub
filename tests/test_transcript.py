@@ -41,3 +41,10 @@ def test_user_list_content():
 def test_malformed_and_unknown_lines_ignored():
     # fixture에 비JSON 줄, queue-operation, sidechain, meta가 있어도 예외 없이 4개만
     assert len(events()) == 4
+
+
+def test_nonstring_text_block_does_not_raise():
+    lines = ['{"type":"user","message":{"role":"user","content":[{"type":"text","text":123},{"type":"text","text":"진짜 텍스트"}]},"sessionId":"s-9","timestamp":"t"}']
+    evs = list(extract_events(lines))
+    assert len(evs) == 1
+    assert evs[0].text == "진짜 텍스트"
