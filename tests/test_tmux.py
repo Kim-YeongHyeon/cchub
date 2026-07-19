@@ -15,7 +15,11 @@ def test_list_panes_parses_and_skips_bad_lines():
     panes = tmux.list_panes(fake)
     assert len(panes) == 2
     assert panes[0] == tmux.Pane("%0", "main:0.0", "/home/u/proj", "claude")
-    assert fake.calls[0][:3] == ["tmux", "list-panes", "-a"]
+    assert fake.calls[0] == ["tmux", "list-panes", "-a", "-F", tmux._FMT]
+    assert tmux._FMT == (
+        "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}"
+        "\t#{pane_current_path}\t#{pane_current_command}"
+    )
 
 
 def test_list_panes_empty_when_tmux_absent():
