@@ -1,4 +1,7 @@
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from cchub.config import Config
 from cchub.index import SessionIndex
@@ -8,6 +11,12 @@ from cchub.tui.app import CchubApp
 from cchub.tui.data import ServerSnapshot
 from conftest import FakeRemote
 from textual.widgets import Input, RichLog, Tree
+
+requires_smoke_ssh = pytest.mark.skipif(
+    subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2",
+                    "cchub-smoke", "true"], capture_output=True).returncode != 0,
+    reason="cchub-smoke ssh alias 불가",
+)
 
 
 def make_app(tmp_path: Path) -> CchubApp:
@@ -254,3 +263,25 @@ async def test_c_toggles_stats_bar_and_polling(tmp_path):
         await pilot.press("c")
         assert app.stats_on is True
         assert not app.query_one("#stats").has_class("hidden")
+
+
+@requires_smoke_ssh
+async def test_real_localhost_end_to_end(tmp_path):
+    """실제 SSH로 sync→discover→stats까지 한 바퀴 (send 없음, 읽기 전용)."""
+    from cchub.config import ServerConfig
+    from cchub.ssh import SSHRemote
+
+    cfg = Config(servers={"local": ServerConfig(name="local", host="cchub-smoke")},
+                 sync_interval=3600, stats_interval=3600)
+    app = CchubApp(cfg=cfg, root=tmp_path, index=SessionIndex(tmp_path / "i.db"),
+                   remote_factory=SSHRemote)
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()   # on_mount의 초기 load_sessions
+        await pilot.pause()
+        tree = app.query_one("#tree", Tree)
+        assert tree.root.children                 # local 서버 노드 존재
+        app.poll_stats()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        from textual.widgets import Static
+        assert "local" in str(app.query_one("#stats", Static).content)
