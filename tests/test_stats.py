@@ -69,3 +69,9 @@ def test_server_stats_history_capped():
                              cur.mem_total_kb, cur.mem_avail_kb)
         s.update(cur)
     assert len(s.history) == 30
+
+
+def test_parse_proc_short_or_malformed_lines_return_none():
+    assert stats.parse_proc("cpu  1 2 3\nMemTotal: 1 kB\nMemAvailable: 1 kB") is None
+    assert stats.parse_proc("cpu  1 2 3 4 5\nMemTotal: abc kB\nMemAvailable: 1 kB") is None
+    assert stats.parse_proc("cpu  1 2 3 4 5\nMemTotal:\nMemAvailable: 1 kB") is None

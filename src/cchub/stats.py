@@ -18,18 +18,18 @@ class RawStats:
 def parse_proc(text: str) -> RawStats | None:
     """`cat /proc/stat /proc/meminfo` 출력에서 필요한 값만 추출. 실패 시 None."""
     cpu_total = cpu_idle = mem_total = mem_avail = None
-    for line in text.splitlines():
-        if line.startswith("cpu "):
-            try:
+    try:
+        for line in text.splitlines():
+            if line.startswith("cpu "):
                 nums = [int(x) for x in line.split()[1:]]
-            except ValueError:
-                return None
-            cpu_total = sum(nums)
-            cpu_idle = nums[3] + (nums[4] if len(nums) > 4 else 0)  # idle+iowait
-        elif line.startswith("MemTotal:"):
-            mem_total = int(line.split()[1])
-        elif line.startswith("MemAvailable:"):
-            mem_avail = int(line.split()[1])
+                cpu_total = sum(nums)
+                cpu_idle = nums[3] + (nums[4] if len(nums) > 4 else 0)  # idle+iowait
+            elif line.startswith("MemTotal:"):
+                mem_total = int(line.split()[1])
+            elif line.startswith("MemAvailable:"):
+                mem_avail = int(line.split()[1])
+    except (ValueError, IndexError):
+        return None
     if None in (cpu_total, cpu_idle, mem_total, mem_avail):
         return None
     return RawStats(cpu_total, cpu_idle, mem_total, mem_avail)
