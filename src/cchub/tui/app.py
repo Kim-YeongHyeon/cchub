@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -9,8 +10,9 @@ from textual.widgets import Footer, Input, RichLog, Static, Tree
 
 from cchub.config import Config, cchub_dir, load_config
 from cchub.index import SessionIndex
+from cchub.sessions import LiveSession
 from cchub.ssh import SSHRemote
-from cchub.tui.data import RemoteFactory
+from cchub.tui.data import RemoteFactory, ServerSnapshot, collect_sessions
 
 
 class CchubApp(App):
@@ -30,6 +32,8 @@ class CchubApp(App):
         Binding("t", "toggle_transcript", "transcript"),
     ]
 
+    _STATE_MARK = {"working": "●", "waiting": "◌", "idle": "▶", "unknown": "?"}
+
     def __init__(
         self,
         cfg: Config | None = None,
@@ -43,6 +47,12 @@ class CchubApp(App):
         self.index = index or SessionIndex(self.root_dir / "index.db")
         self.remote_factory = remote_factory
 
+    def on_mount(self) -> None:
+        self.selected: LiveSession | None = None
+        self.snapshots: dict[str, ServerSnapshot] = {}
+        self.set_interval(self.cfg.sync_interval, self.action_refresh)
+        self.action_refresh()
+
     def compose(self) -> ComposeResult:
         yield Static("", id="stats")
         with Horizontal(id="body"):
@@ -52,9 +62,30 @@ class CchubApp(App):
                 yield Input(placeholder="프롬프트 입력 후 Enter (세션 선택 필요)", id="prompt")
         yield Footer()
 
-    # 이후 태스크에서 액션/워커 메서드 추가. 지금은 no-op 액션으로 바인딩만 유효화.
     def action_refresh(self) -> None:
-        pass
+        if self.cfg.servers:
+            self.load_sessions()
+
+    @work(thread=True, exclusive=True, group="refresh")
+    def load_sessions(self) -> None:
+        snaps = collect_sessions(self.cfg, self.root_dir, self.index, self.remote_factory)
+        self.call_from_thread(self.apply_snapshots, snaps)
+
+    def apply_snapshots(self, snaps: dict[str, ServerSnapshot]) -> None:
+        self.snapshots = snaps
+        tree = self.query_one("#tree", Tree)
+        tree.clear()
+        tree.root.expand()
+        for name, s in snaps.items():
+            label = f"{name}  ⚠ {s.error}" if s.error else name
+            node = tree.root.add(label, expand=True)
+            for ls in s.sessions:
+                mark = self._STATE_MARK.get(ls.state, "?")
+                node.add_leaf(f"{ls.number} {mark} {ls.project}  {ls.title}", data=ls)
+
+    def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+        if event.node.data is not None:
+            self.selected = event.node.data
 
     def action_toggle_stats(self) -> None:
         pass
