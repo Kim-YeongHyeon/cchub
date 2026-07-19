@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -180,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
         return handler(args)
     except ConfigError as e:
         print(str(e), file=sys.stderr)
+        return 1
+    except (sqlite3.Error, OSError) as e:
+        print(f"오류: {e}", file=sys.stderr)
         return 1
 
 

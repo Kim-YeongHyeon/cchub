@@ -47,7 +47,7 @@ def test_send_resolves_number_and_sends(env, capsys):
     _, fake = env
     assert cli.main(["send", "srv1", "1", "실험 시작해줘"]) == 0
     sent = [c for c in fake.calls if c[:2] == ["tmux", "send-keys"]]
-    assert sent[0] == ["tmux", "send-keys", "-t", "%5", "-l", "실험 시작해줘"]
+    assert sent[0] == ["tmux", "send-keys", "-t", "%5", "-l", "--", "실험 시작해줘"]
     assert sent[1][-1] == "Enter"
 
 
@@ -73,3 +73,12 @@ def test_reindex(env, capsys):
     cli.main(["sync"])
     assert cli.main(["reindex"]) == 0
     assert "3" in capsys.readouterr().out  # 재인덱싱된 이벤트 수
+
+
+def test_corrupt_index_db_is_handled(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    (tmp_path / "config.toml").write_text('[servers.srv1]\nhost = "u@h"\n')
+    (tmp_path / "index.db").write_bytes(b"this is not sqlite")
+    rc = cli.main(["search", "x"])
+    assert rc == 1
+    assert "오류" in capsys.readouterr().err  # traceback이 아니라 한 줄 메시지

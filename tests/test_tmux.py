@@ -31,7 +31,7 @@ def test_send_prompt_literal_then_enter():
     fake = FakeRemote()
     ok = tmux.send_prompt(fake, "%0", "hello; rm -rf 아님 $HOME")
     assert ok
-    assert fake.calls[0] == ["tmux", "send-keys", "-t", "%0", "-l",
+    assert fake.calls[0] == ["tmux", "send-keys", "-t", "%0", "-l", "--",
                              "hello; rm -rf 아님 $HOME"]
     assert fake.calls[1] == ["tmux", "send-keys", "-t", "%0", "Enter"]
 
@@ -40,6 +40,13 @@ def test_send_prompt_fails_fast():
     fake = FakeRemote({"tmux": RunResult(1, "", "no pane")})
     assert not tmux.send_prompt(fake, "%9", "x")
     assert len(fake.calls) == 1  # Enter는 시도 안 함
+
+
+def test_send_prompt_leading_dash_not_parsed_as_flag():
+    fake = FakeRemote()
+    tmux.send_prompt(fake, "%0", "-x 로 시작하는 프롬프트")
+    cmd = fake.calls[0]
+    assert cmd[cmd.index("--") + 1] == "-x 로 시작하는 프롬프트"
 
 
 def test_capture():

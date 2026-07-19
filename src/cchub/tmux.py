@@ -28,8 +28,8 @@ def list_panes(remote: Remote) -> list[Pane]:
 
 
 def send_prompt(remote: Remote, pane_id: str, text: str) -> bool:
-    # -l(literal): 텍스트를 키 이름으로 해석하지 않음. Enter는 별도 전송.
-    if remote.run(["tmux", "send-keys", "-t", pane_id, "-l", text]).rc != 0:
+    # -l(literal): 키 이름 해석 금지. --: '-'로 시작하는 텍스트의 플래그 오인 방지.
+    if remote.run(["tmux", "send-keys", "-t", pane_id, "-l", "--", text]).rc != 0:
         return False
     return remote.run(["tmux", "send-keys", "-t", pane_id, "Enter"]).rc == 0
 

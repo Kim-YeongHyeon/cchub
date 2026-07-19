@@ -1,5 +1,6 @@
 import shutil
 import sqlite3
+import threading
 from pathlib import Path
 
 from cchub.index import SessionIndex
@@ -148,3 +149,24 @@ def test_old_schema_index_is_migrated_on_open(tmp_path):
     shutil.copy(FIXTURE, p)
     assert idx.index_file("srv1", "-home-u-proj", p) == 3  # 재인덱싱 가능
     assert idx.search("srv1") == []  # 새 스키마도 메타데이터 매칭 안 됨
+
+
+def test_index_is_thread_safe(tmp_path):
+    idx, p = make(tmp_path)
+    errors: list[Exception] = []
+
+    def worker():
+        try:
+            for _ in range(20):
+                idx.index_file("srv1", "-home-u-proj", p)
+                idx.list_sessions()
+                idx.search("NUMA")
+        except Exception as e:  # noqa: BLE001 - 어떤 예외든 실패 증거
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
