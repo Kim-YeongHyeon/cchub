@@ -4,6 +4,13 @@ from pathlib import Path
 from cchub.ssh import RunResult, SSHRemote
 
 
+def _control_path(remote: SSHRemote) -> str:
+    for opt in remote._opts:
+        if opt.startswith("ControlPath="):
+            return opt[len("ControlPath="):]
+    raise AssertionError("ControlPath 옵션을 찾지 못함")
+
+
 def test_run_builds_quoted_ssh_command(monkeypatch, tmp_path):
     monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
     captured = {}
@@ -53,3 +60,14 @@ def test_mirror_builds_rsync_without_delete(monkeypatch, tmp_path):
     assert cmd[-2] == "user@host:~/.claude/projects/"
     assert cmd[-1] == str(dst) + "/"
     assert dst.exists()  # 로컬 디렉토리 자동 생성
+
+
+def test_control_path_stays_under_unix_socket_limit_for_long_cchub_dir(monkeypatch, tmp_path):
+    # AF_UNIX 소켓 경로는 보통 108바이트 제한 — CCHUB_DIR이 깊은 경로(예: 스크래치패드)에
+    # 있으면 ControlPath={cm}/%r@%h-%p 가 이 한도를 넘어 ssh/rsync가
+    # "ControlPath too long"으로 실패한다.
+    long_dir = tmp_path / ("nested_dir_segment_" * 6)
+    monkeypatch.setenv("CCHUB_DIR", str(long_dir))
+    remote = SSHRemote("user@some-very-descriptive-hostname.example.internal")
+    control_path = _control_path(remote)
+    assert len(control_path.encode()) < 100
