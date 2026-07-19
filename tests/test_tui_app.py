@@ -224,3 +224,33 @@ async def test_working_session_confirm_y_sends(tmp_path):
         sent = [c for c in fake.calls if c[:2] == ["tmux", "send-keys"]]
         assert sent[0] == ["tmux", "send-keys", "-t", "%5", "-l", "--", "큐잉될 프롬프트"]
         assert inp.value == ""
+
+
+PROC_OUT = """cpu  100 0 100 700 100 0 0 0 0 0
+MemTotal:       65536000 kB
+MemAvailable:   32768000 kB
+"""
+
+
+async def test_stats_bar_updates_from_poll(tmp_path):
+    fake = FakeRemote({"cat": RunResult(0, PROC_OUT, "")})
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        app.poll_stats()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        from textual.widgets import Static
+        bar = app.query_one("#stats", Static)
+        assert "srv1" in str(bar.content)   # 첫 샘플이라 %는 없어도 이름은 표시
+
+
+async def test_c_toggles_stats_bar_and_polling(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        assert app.stats_on is True
+        await pilot.press("c")
+        assert app.stats_on is False
+        assert app.query_one("#stats").has_class("hidden")
+        await pilot.press("c")
+        assert app.stats_on is True
+        assert not app.query_one("#stats").has_class("hidden")

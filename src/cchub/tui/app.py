@@ -9,7 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, RichLog, Static, Tree
 
-from cchub import tmux
+from cchub import stats as stats_mod, tmux
 from cchub.config import Config, cchub_dir, load_config
 from cchub.index import SessionIndex
 from cchub.sessions import LiveSession
@@ -81,6 +81,9 @@ class CchubApp(App):
         self.follow_on = False
         self._follow_timer = self.set_interval(2, self._follow_tick, pause=True)
         self.set_interval(self.cfg.sync_interval, self.action_refresh)
+        self.stats_on = True
+        self.server_stats = {name: stats_mod.ServerStats() for name in self.cfg.servers}
+        self._stats_timer = self.set_interval(self.cfg.stats_interval, self.poll_stats)
         self.action_refresh()
 
     def compose(self) -> ComposeResult:
@@ -170,8 +173,25 @@ class CchubApp(App):
         if self.follow_on and not self.transcript_mode:
             self.show_detail()
 
+    @work(thread=True, exclusive=True, group="stats", exit_on_error=False)
+    def poll_stats(self) -> None:
+        labels = []
+        for name, s in self.cfg.servers.items():
+            tracker = self.server_stats.setdefault(name, stats_mod.ServerStats())
+            tracker.update(stats_mod.read_stats(self.remote_factory(s.host)))
+            labels.append(tracker.label(name))
+        self.call_from_thread(self._update_stats_bar, "   ".join(labels))
+
+    def _update_stats_bar(self, text: str) -> None:
+        self.query_one("#stats", Static).update(text)
+
     def action_toggle_stats(self) -> None:
-        pass
+        self.stats_on = not self.stats_on
+        self.query_one("#stats", Static).set_class(not self.stats_on, "hidden")
+        if self.stats_on:
+            self._stats_timer.resume()
+        else:
+            self._stats_timer.pause()
 
     def action_toggle_follow(self) -> None:
         self.follow_on = not self.follow_on
