@@ -64,3 +64,23 @@ def test_discover_waiting_state_from_index(tmp_path):
     idx.index_file("srv1", "-home-u-proj", new)
     live = sessions.discover(fake, "srv1", cache, idx)
     assert live[0].state == "waiting"  # 마지막 메시지가 assistant → 입력 대기
+
+
+def test_mtime_of_missing_file_is_zero(tmp_path):
+    assert sessions._mtime(tmp_path / "ghost.jsonl") == 0.0
+
+
+def test_discover_survives_vanishing_file(tmp_path, monkeypatch):
+    fake = FakeRemote({"tmux": RunResult(0, PANES, "")})
+    cache = setup_cache(tmp_path)
+    real_stat = Path.stat
+    target = cache / "projects" / "-home-u-proj" / "new-session.jsonl"
+
+    def flaky_stat(self, **kw):
+        if self == target:
+            raise FileNotFoundError(self)
+        return real_stat(self, **kw)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+    live = sessions.discover(fake, "srv1", cache)  # 예외 없이 동작해야 함
+    assert len(live) == 2

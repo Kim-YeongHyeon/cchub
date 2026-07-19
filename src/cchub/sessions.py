@@ -13,6 +13,14 @@ _CLAUDE_COMMANDS = {"claude", "node"}
 _WORKING_WINDOW_SECS = 30
 
 
+def _mtime(path: Path) -> float:
+    """파일의 수정 시간을 반환. 파일이 없으면 0.0 반환 (race condition 대응)."""
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def encode_project(cwd: str) -> str:
     """Claude Code가 cwd를 ~/.claude/projects/ 디렉토리명으로 바꾸는 규칙."""
     return cwd.replace("/", "-")
@@ -47,13 +55,13 @@ def discover(
         proj_dir = cache_dir / "projects" / project
         session_id, title, state = "", "", "unknown"
         jsonls = (
-            sorted(proj_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+            sorted(proj_dir.glob("*.jsonl"), key=lambda f: _mtime(f), reverse=True)
             if proj_dir.is_dir() else []
         )
         if jsonls:
             newest = jsonls[0]
             session_id = newest.stem
-            if now - newest.stat().st_mtime < _WORKING_WINDOW_SECS:
+            if now - _mtime(newest) < _WORKING_WINDOW_SECS:
                 state = "working"
             else:
                 state = "idle"
