@@ -69,3 +69,47 @@ async def test_selecting_leaf_sets_selected(tmp_path):
         tree.select_node(leaf)
         await pilot.pause()
         assert app.selected is not None and app.selected.number == 1
+
+
+async def test_refresh_reconciles_selected_to_fresh_object(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap(state="idle"))
+        tree = app.query_one("#tree", Tree)
+        leaf = tree.root.children[0].children[0]
+        tree.select_node(leaf)
+        await pilot.pause()
+        old = app.selected
+        app.apply_snapshots(snap(state="working"))   # 같은 pane_id, 새 객체
+        assert app.selected is not old
+        assert app.selected.state == "working"       # 새 객체로 교체됨
+
+
+async def test_refresh_clears_selected_when_pane_gone(tmp_path):
+    from cchub.tui.data import ServerSnapshot
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap())
+        tree = app.query_one("#tree", Tree)
+        tree.select_node(tree.root.children[0].children[0])
+        await pilot.pause()
+        app.apply_snapshots({"srv1": ServerSnapshot(server="srv1", sessions=[])})
+        assert app.selected is None
+
+
+async def test_load_sessions_survives_collect_exception(tmp_path, monkeypatch):
+    import cchub.tui.app as app_mod
+    def boom(*a, **k):
+        raise RuntimeError("네트워크 붕괴")
+    monkeypatch.setattr(app_mod, "collect_sessions", boom)
+    app = make_app(tmp_path)
+    from cchub.config import ServerConfig
+    app.cfg.servers["srv1"] = ServerConfig(name="srv1", host="u@h")
+    async with app.run_test() as pilot:
+        app.load_sessions()
+        try:
+            await app.workers.wait_for_complete()
+        except Exception:
+            pass  # Worker may be cancelled; we just care the app survives
+        await pilot.pause()
+        assert app.is_running   # 앱이 죽지 않음

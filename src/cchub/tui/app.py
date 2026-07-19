@@ -66,9 +66,13 @@ class CchubApp(App):
         if self.cfg.servers:
             self.load_sessions()
 
-    @work(thread=True, exclusive=True, group="refresh")
+    @work(thread=True, exclusive=True, group="refresh", exit_on_error=False)
     def load_sessions(self) -> None:
-        snaps = collect_sessions(self.cfg, self.root_dir, self.index, self.remote_factory)
+        try:
+            snaps = collect_sessions(self.cfg, self.root_dir, self.index, self.remote_factory)
+        except Exception as e:  # noqa: BLE001 - 주기 갱신 실패가 앱을 죽이면 안 됨
+            self.call_from_thread(self.notify, f"동기화 실패: {e}", severity="error")
+            return
         self.call_from_thread(self.apply_snapshots, snaps)
 
     def apply_snapshots(self, snaps: dict[str, ServerSnapshot]) -> None:
@@ -82,6 +86,20 @@ class CchubApp(App):
             for ls in s.sessions:
                 mark = self._STATE_MARK.get(ls.state, "?")
                 node.add_leaf(f"{ls.number} {mark} {ls.project}  {ls.title}", data=ls)
+        self._reconcile_selection(tree)
+
+    def _reconcile_selection(self, tree: Tree) -> None:
+        if self.selected is None:
+            return
+        key = (self.selected.server, self.selected.pane_id)
+        for server_node in tree.root.children:
+            for leaf in server_node.children:
+                ls = leaf.data
+                if ls is not None and (ls.server, ls.pane_id) == key:
+                    self.selected = ls
+                    tree.select_node(leaf)
+                    return
+        self.selected = None
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         if event.node.data is not None:
