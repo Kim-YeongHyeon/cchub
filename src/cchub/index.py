@@ -112,6 +112,7 @@ class SessionIndex:
         self.db.execute(
             "DELETE FROM messages WHERE server=? AND session_id=?", (server, session_id)
         )
+        self.db.commit()
 
     def get_session(self, server: str, session_id: str) -> SessionRow | None:
         row = self.db.execute(
@@ -133,12 +134,26 @@ class SessionIndex:
         return [SessionRow(*r) for r in rows]
 
     def search(self, query: str, limit: int = 20) -> list[tuple[str, str, str, str, str]]:
-        return self.db.execute(
-            "SELECT server, session_id, role, ts,"
-            " snippet(messages, 4, '[', ']', '…', 12)"
-            " FROM messages WHERE messages MATCH ? ORDER BY ts DESC LIMIT ?",
-            (query, limit),
-        ).fetchall()
+        try:
+            return self.db.execute(
+                "SELECT server, session_id, role, ts,"
+                " snippet(messages, 4, '[', ']', '…', 12)"
+                " FROM messages WHERE messages MATCH ? ORDER BY ts DESC LIMIT ?",
+                (query, limit),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Retry with query escaped as a quoted phrase for FTS5
+            escaped_query = '"' + query.replace('"', '""') + '"'
+            try:
+                return self.db.execute(
+                    "SELECT server, session_id, role, ts,"
+                    " snippet(messages, 4, '[', ']', '…', 12)"
+                    " FROM messages WHERE messages MATCH ? ORDER BY ts DESC LIMIT ?",
+                    (escaped_query, limit),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # If escaped query also fails, return empty results
+                return []
 
     def tail(self, server: str, session_id: str, limit: int = 10) -> list[tuple[str, str, str]]:
         rows = self.db.execute(

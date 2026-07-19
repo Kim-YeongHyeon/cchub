@@ -77,3 +77,20 @@ def test_forget_all(tmp_path):
     idx.forget_all()
     assert idx.list_sessions() == []
     assert idx.index_file("srv1", "-home-u-proj", p) == 3  # 재인덱싱 가능
+
+
+def test_shrink_to_zero_is_durable_across_connections(tmp_path):
+    idx, p = make(tmp_path)
+    idx.index_file("srv1", "-home-u-proj", p)
+    p.write_text("")  # 0바이트로 truncate
+    assert idx.index_file("srv1", "-home-u-proj", p) == 0
+    other = SessionIndex(tmp_path / "index.db")  # 별도 연결
+    assert other.get_session("srv1", "s-1") is None
+
+
+def test_search_survives_fts_syntax_hazards(tmp_path):
+    idx, p = make(tmp_path)
+    idx.index_file("srv1", "-home-u-proj", p)
+    for q in ["O'Brien", "NUMA AND", 'unbalanced "quote', "-"]:
+        idx.search(q)  # 예외만 안 나면 됨
+    assert idx.search('NUMA"') != []
