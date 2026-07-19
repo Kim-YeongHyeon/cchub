@@ -6,6 +6,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, RichLog, Static, Tree
 
 from cchub import tmux
@@ -14,6 +15,31 @@ from cchub.index import SessionIndex
 from cchub.sessions import LiveSession
 from cchub.ssh import SSHRemote
 from cchub.tui.data import RemoteFactory, ServerSnapshot, collect_sessions
+
+
+class ConfirmSend(ModalScreen[bool]):
+    CSS = """
+    ConfirmSend { align: center middle; }
+    #confirm { padding: 1 2; background: $panel; border: solid $warning; }
+    """
+    BINDINGS = [
+        Binding("y", "yes", "전송"),
+        Binding("n", "no", "취소"),
+        Binding("escape", "no", "취소"),
+    ]
+
+    def __init__(self, message: str):
+        super().__init__()
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"{self.message}\n\n[y] 전송   [n] 취소", id="confirm")
+
+    def action_yes(self) -> None:
+        self.dismiss(True)
+
+    def action_no(self) -> None:
+        self.dismiss(False)
 
 
 class CchubApp(App):
@@ -159,6 +185,45 @@ class CchubApp(App):
         self.transcript_mode = not self.transcript_mode
         self.notify(f"transcript 모드 {'ON' if self.transcript_mode else 'OFF(live)'}")
         self.show_detail()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        text = event.value.strip()
+        if not text:
+            return
+        if self.selected is None:
+            self.notify("세션을 먼저 선택하세요", severity="warning")
+            return
+        if self.selected.state == "working":
+            def _decided(ok: bool | None) -> None:
+                if ok:
+                    self.do_send(text)
+            self.push_screen(
+                ConfirmSend("세션이 작업 중(●)입니다 — 프롬프트는 큐에 들어갑니다. 보낼까요?"),
+                _decided,
+            )
+        else:
+            self.do_send(text)
+
+    @work(thread=True, group="send", exit_on_error=False)
+    def do_send(self, text: str) -> None:
+        ls = self.selected
+        if ls is None:
+            return
+        try:
+            remote = self.remote_factory(self.cfg.servers[ls.server].host)
+            ok = tmux.send_prompt(remote, ls.pane_id, text)
+        except Exception as e:  # noqa: BLE001
+            self.call_from_thread(self.notify, f"전송 실패: {e}", severity="error")
+            return
+        self.call_from_thread(self._after_send, ok)
+
+    def _after_send(self, ok: bool) -> None:
+        if ok:
+            self.query_one("#prompt", Input).value = ""
+            self.notify("전송됨")
+            self.show_detail()
+        else:
+            self.notify("전송 실패 (pane 소실 또는 tmux 오류)", severity="error")
 
 
 def run_tui() -> None:

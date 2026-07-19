@@ -7,7 +7,7 @@ from cchub.ssh import RunResult
 from cchub.tui.app import CchubApp
 from cchub.tui.data import ServerSnapshot
 from conftest import FakeRemote
-from textual.widgets import RichLog, Tree
+from textual.widgets import Input, RichLog, Tree
 
 
 def make_app(tmp_path: Path) -> CchubApp:
@@ -158,3 +158,50 @@ async def test_follow_toggle_flips_state(tmp_path):
         assert app.follow_on is True
         await pilot.press("f")
         assert app.follow_on is False
+
+
+async def test_submit_sends_prompt_to_selected_session(tmp_path):
+    fake = FakeRemote({"tmux": RunResult(0, "", "")})
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap(state="idle"))
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        inp = app.query_one("#prompt", Input)
+        inp.focus()
+        inp.value = "실험 시작해줘"
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        sent = [c for c in fake.calls if c[:2] == ["tmux", "send-keys"]]
+        assert sent[0] == ["tmux", "send-keys", "-t", "%5", "-l", "--", "실험 시작해줘"]
+        assert inp.value == ""  # 성공 시 입력창 비움
+
+
+async def test_submit_without_selection_warns_and_does_not_send(tmp_path):
+    fake = FakeRemote()
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        inp = app.query_one("#prompt", Input)
+        inp.focus()
+        inp.value = "아무거나"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not any(c[:2] == ["tmux", "send-keys"] for c in fake.calls)
+
+
+async def test_working_session_asks_confirmation(tmp_path):
+    fake = FakeRemote({"tmux": RunResult(0, "", "")})
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap(state="working"))
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        inp = app.query_one("#prompt", Input)
+        inp.focus()
+        inp.value = "큐잉될 프롬프트"
+        await pilot.press("enter")
+        await pilot.pause()
+        from cchub.tui.app import ConfirmSend
+        assert isinstance(app.screen, ConfirmSend)  # 모달 떠 있음
+        await pilot.press("n")                       # 취소
+        await pilot.pause()
+        assert not any(c[:2] == ["tmux", "send-keys"] for c in fake.calls)
