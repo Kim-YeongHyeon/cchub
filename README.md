@@ -74,12 +74,17 @@ claude_dir = "~/.claude"      # 원격의 claude 홈 (기본값)
 - tmux pane은 `pane_current_command`가 `claude` 또는 `node`인 것만 세션
   후보로 본다 (claude 실행 방식에 따라 다르게 보이기 때문). 그 외 명령(예:
   `cat`, `bash`)이 돌고 있는 pane은 목록/전송 대상에서 제외된다.
+- 같은 작업 디렉터리(cwd)에서 claude pane을 두 개 이상 띄우면, 둘 다 그
+  프로젝트의 가장 최근 jsonl 세션에 매칭된다 — tail/title/상태가 실제로는
+  다른 pane의 내용을 가리킬 수 있다. M1의 알려진 한계이며, M2에서
+  프로세스 기반 매칭으로 개선할 예정이다.
 
 ## 스모크 테스트
 
 `cchub-smoke` (localhost, SSH 포트 7777)를 서버로 등록해 실제 SSH·rsync·tmux
 경로를 검증했다: `sync`가 실제 `~/.claude/projects`를 미러링·인덱싱하고,
 `list`/`search`/`tail`(인덱스 및 `--live` 캡처 모두)이 실제 데이터로 동작함을
-확인했다. 이 과정에서 `CCHUB_DIR`이 깊은 경로에 있을 때 ssh `ControlPath`가
-AF_UNIX 소켓 108바이트 제한을 넘어 실패하는 결함을 발견해 수정했다 (자세한
-내용은 `.superpowers/sdd/task-9-report.md` 참고).
+확인했다. 실제 `~/.claude`에서 파일 22개·이벤트 6658건이 동기화됐고, 살아있는
+tmux pane들이 정상적으로 발견됐다. 이 과정에서 `CCHUB_DIR`이 깊은 경로에 있을
+때 ssh `ControlPath`가 AF_UNIX 소켓 108바이트 제한을 넘어 실패하는 결함을
+발견해 수정했다.
