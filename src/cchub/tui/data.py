@@ -29,12 +29,15 @@ def collect_sessions(
     """서버별 sync 후 discover. 서버 하나의 실패가 다른 서버에 전파되지 않는다."""
     out: dict[str, ServerSnapshot] = {}
     for name, s in cfg.servers.items():
-        remote = remote_factory(s.host)
-        rep = sync_server(remote, name, s.claude_dir, root / "cache", index)
-        sessions = discover(remote, name, root / "cache" / name, index)
-        out[name] = ServerSnapshot(
-            server=name,
-            sessions=sessions,
-            error="" if rep.ok else rep.error,
-        )
+        try:
+            remote = remote_factory(s.host)
+            rep = sync_server(remote, name, s.claude_dir, root / "cache", index)
+            sessions = discover(remote, name, root / "cache" / name, index)
+            out[name] = ServerSnapshot(
+                server=name,
+                sessions=sessions,
+                error=rep.error,
+            )
+        except Exception as e:  # noqa: BLE001 - 서버 하나의 실패가 전체를 죽이면 안 됨
+            out[name] = ServerSnapshot(server=name, sessions=[], error=str(e))
     return out
