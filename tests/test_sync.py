@@ -37,3 +37,25 @@ def test_sync_server_reports_mirror_failure(tmp_path):
     rep = sync_server(FailingMirrorRemote(), "srv1", "~/.claude", tmp_path / "cache", idx)
     assert not rep.ok
     assert "refused" in rep.error
+
+
+def test_sync_server_skips_failing_file_and_continues(tmp_path, monkeypatch):
+    fake = FakeRemote()
+    idx = SessionIndex(tmp_path / "i.db")
+    root = tmp_path / "cache" / "srv1" / "projects"
+    proj_a = root / "-home-u-aproj"; proj_a.mkdir(parents=True)
+    proj_b = root / "-home-u-bproj"; proj_b.mkdir(parents=True)
+    shutil.copy(FIXTURE, proj_a / "bad.jsonl")
+    shutil.copy(FIXTURE, proj_b / "good.jsonl")
+    real = SessionIndex.index_file
+
+    def flaky(self, server, project, path):
+        if path.name == "bad.jsonl":
+            raise OSError("디스크 오류")
+        return real(self, server, project, path)
+
+    monkeypatch.setattr(SessionIndex, "index_file", flaky)
+    rep = sync_server(fake, "srv1", "~/.claude", tmp_path / "cache", idx)
+    assert rep.ok                      # 미러 자체는 성공
+    assert rep.files == 1 and rep.events == 3   # good.jsonl은 반영됨
+    assert "bad.jsonl" in rep.error    # 실패 파일이 error에 기록됨

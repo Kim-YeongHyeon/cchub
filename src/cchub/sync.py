@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,9 +29,15 @@ def sync_server(
     if r.rc != 0:
         return SyncReport(server=server, ok=False, error=r.err.strip())
     files = events = 0
+    failed: list[str] = []
     for path in sorted(cache.glob("*/*.jsonl")):
-        n = index.index_file(server, path.parent.name, path)
+        try:
+            n = index.index_file(server, path.parent.name, path)
+        except (OSError, sqlite3.Error):
+            failed.append(path.name)
+            continue
         if n:
             files += 1
             events += n
-    return SyncReport(server=server, ok=True, files=files, events=events)
+    error = f"index 실패 {len(failed)}건: {', '.join(failed)}" if failed else ""
+    return SyncReport(server=server, ok=True, files=files, events=events, error=error)
