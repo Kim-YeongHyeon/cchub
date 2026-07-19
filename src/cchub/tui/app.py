@@ -8,6 +8,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Input, RichLog, Static, Tree
+from textual.worker import get_current_worker
 
 from cchub import stats as stats_mod, tmux
 from cchub.config import Config, cchub_dir, load_config
@@ -101,10 +102,15 @@ class CchubApp(App):
 
     @work(thread=True, exclusive=True, group="refresh", exit_on_error=False)
     def load_sessions(self) -> None:
+        worker = get_current_worker()
         try:
             snaps = collect_sessions(self.cfg, self.root_dir, self.index, self.remote_factory)
         except Exception as e:  # noqa: BLE001 - 주기 갱신 실패가 앱을 죽이면 안 됨
+            if worker.is_cancelled:
+                return
             self.call_from_thread(self.notify, f"동기화 실패: {e}", severity="error")
+            return
+        if worker.is_cancelled:
             return
         self.call_from_thread(self.apply_snapshots, snaps)
 
@@ -145,14 +151,21 @@ class CchubApp(App):
 
     @work(thread=True, exclusive=True, group="detail", exit_on_error=False)
     def refresh_detail(self) -> None:
+        worker = get_current_worker()
         ls = self.selected
         if ls is None:
             return
         if self.transcript_mode:
-            rows = (
-                self.index.tail(ls.server, ls.session_id, limit=30)
-                if ls.session_id else []
-            )
+            try:
+                rows = (
+                    self.index.tail(ls.server, ls.session_id, limit=30)
+                    if ls.session_id else []
+                )
+            except Exception as e:  # noqa: BLE001
+                if worker.is_cancelled:
+                    return
+                self.call_from_thread(self.notify, f"transcript 조회 실패: {e}", severity="error")
+                return
             text = "\n".join(f"── {role} {ts}\n{body}" for role, ts, body in rows) \
                    or "(transcript 없음 — 동기화 대기)"
         else:
@@ -160,8 +173,12 @@ class CchubApp(App):
                 remote = self.remote_factory(self.cfg.servers[ls.server].host)
                 text = tmux.capture(remote, ls.pane_id, lines=200) or "(캡처 실패)"
             except Exception as e:  # noqa: BLE001
+                if worker.is_cancelled:
+                    return
                 self.call_from_thread(self.notify, f"상세 조회 실패: {e}", severity="error")
                 return
+        if worker.is_cancelled:
+            return
         self.call_from_thread(self._write_detail, text)
 
     def _write_detail(self, text: str) -> None:
@@ -175,11 +192,14 @@ class CchubApp(App):
 
     @work(thread=True, exclusive=True, group="stats", exit_on_error=False)
     def poll_stats(self) -> None:
+        worker = get_current_worker()
         labels = []
         for name, s in self.cfg.servers.items():
             tracker = self.server_stats.setdefault(name, stats_mod.ServerStats())
             tracker.update(stats_mod.read_stats(self.remote_factory(s.host)))
             labels.append(tracker.label(name))
+        if worker.is_cancelled:
+            return
         self.call_from_thread(self._update_stats_bar, "   ".join(labels))
 
     def _update_stats_bar(self, text: str) -> None:
@@ -228,6 +248,7 @@ class CchubApp(App):
     def do_send(self, text: str) -> None:
         ls = self.selected
         if ls is None:
+            self.call_from_thread(self.notify, "선택된 세션이 사라졌습니다", severity="warning")
             return
         try:
             remote = self.remote_factory(self.cfg.servers[ls.server].host)

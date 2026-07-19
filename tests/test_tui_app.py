@@ -126,6 +126,102 @@ async def test_load_sessions_survives_collect_exception(tmp_path, monkeypatch):
         assert app.is_running   # 앱이 죽지 않음
 
 
+# 주의: 실제 스레드 경합(워커 A를 블로킹시키고 워커 B가 먼저 끝나게 하는 방식)으로
+# "취소된 워커가 UI를 덮지 않는다"를 검증하는 테스트는 on_mount()가 이미 같은
+# exclusive 그룹("refresh")으로 load_sessions()를 한 번 돌리기 때문에 A/B 두 워커만
+# 있다고 가정한 타이밍이 성립하지 않아 실제로 껐다 켰다 하며 flaky했다(5회 중 2회
+# 성공/3회 실패를 직접 확인). 그래서 여기서는 대신 get_current_worker()를 가짜
+# 취소 상태로 monkeypatch해서 "cancelled면 절대 UI를 갱신하지 않는다"를 결정적으로
+# 검증한다 — 세 워커(load_sessions/poll_stats/refresh_detail) 각각에 대해.
+
+async def test_load_sessions_skips_ui_update_when_cancelled(tmp_path, monkeypatch):
+    import cchub.tui.app as app_mod
+
+    class FakeCancelledWorker:
+        is_cancelled = True
+
+    monkeypatch.setattr(app_mod, "get_current_worker", lambda: FakeCancelledWorker())
+    marker = {"srv1": ServerSnapshot(server="srv1", sessions=[])}
+    monkeypatch.setattr(app_mod, "collect_sessions", lambda *a, **k: marker)
+    app = make_app(tmp_path)
+    from cchub.config import ServerConfig
+    app.cfg.servers["srv1"] = ServerConfig(name="srv1", host="u@h")
+    async with app.run_test() as pilot:
+        app.load_sessions()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        # collect_sessions는 marker를 반환했지만, 취소된 워커는 apply_snapshots를
+        # 호출하지 않으므로 snapshots는 여전히 빈 상태여야 한다.
+        assert app.snapshots == {}
+
+
+async def test_poll_stats_skips_ui_update_when_cancelled(tmp_path, monkeypatch):
+    import cchub.tui.app as app_mod
+
+    class FakeCancelledWorker:
+        is_cancelled = True
+
+    monkeypatch.setattr(app_mod, "get_current_worker", lambda: FakeCancelledWorker())
+    fake = FakeRemote({"cat": RunResult(0, PROC_OUT, "")})
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        from textual.widgets import Static
+        bar = app.query_one("#stats", Static)
+        before = str(bar.content)
+        app.poll_stats()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert str(bar.content) == before   # 취소된 워커는 stats bar를 갱신하지 않음
+
+
+async def test_refresh_detail_skips_write_when_cancelled(tmp_path, monkeypatch):
+    import cchub.tui.app as app_mod
+
+    class FakeCancelledWorker:
+        is_cancelled = True
+
+    monkeypatch.setattr(app_mod, "get_current_worker", lambda: FakeCancelledWorker())
+    fake = FakeRemote({"tmux": RunResult(0, "화면 캡처 내용\n", "")})
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap())
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        log = app.query_one("#detail", RichLog)
+        app.show_detail()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        # tmux.capture는 성공했지만, 취소된 워커는 _write_detail을 호출하지 않으므로
+        # 로그는 여전히 비어 있어야 한다.
+        assert not log.lines
+
+
+async def test_transcript_error_notifies(tmp_path, monkeypatch):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap())
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        app.transcript_mode = True
+
+        def boom(*a, **k):
+            raise RuntimeError("db 깨짐")
+
+        monkeypatch.setattr(app.index, "tail", boom)
+        app.show_detail()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.is_running   # 앱 생존 + (notify는 크래시 없이 처리됨)
+
+
+async def test_do_send_selected_none_warns_instead_of_silent_return(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.selected = None
+        app.do_send("아무거나")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.is_running   # 크래시 없이 경고 처리됨
+
+
 def make_app_with_remote(tmp_path, fake):
     app = make_app(tmp_path)
     app.remote_factory = lambda h: fake
