@@ -205,3 +205,22 @@ async def test_working_session_asks_confirmation(tmp_path):
         await pilot.press("n")                       # 취소
         await pilot.pause()
         assert not any(c[:2] == ["tmux", "send-keys"] for c in fake.calls)
+
+
+async def test_working_session_confirm_y_sends(tmp_path):
+    fake = FakeRemote({"tmux": RunResult(0, "", "")})
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap(state="working"))
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        inp = app.query_one("#prompt", Input)
+        inp.focus()
+        inp.value = "큐잉될 프롬프트"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("y")          # 확인 → 전송
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        sent = [c for c in fake.calls if c[:2] == ["tmux", "send-keys"]]
+        assert sent[0] == ["tmux", "send-keys", "-t", "%5", "-l", "--", "큐잉될 프롬프트"]
+        assert inp.value == ""
