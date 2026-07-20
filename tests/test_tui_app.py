@@ -411,6 +411,35 @@ async def test_c_toggles_stats_bar_and_polling(tmp_path):
         assert not app.query_one("#stats").has_class("hidden")
 
 
+async def test_r_collects_results_via_worker(tmp_path, monkeypatch):
+    import cchub.tui.app as app_mod
+    from cchub.results import FetchReport
+
+    collected = []
+
+    def fake_collect(cfg, root, server, remote_factory):
+        collected.append(server)
+        return FetchReport(server=server, ok=True)
+
+    monkeypatch.setattr(app_mod, "collect_results", fake_collect)
+    app = make_app(tmp_path)
+    from cchub.config import ServerConfig
+    app.cfg.servers["srv1"] = ServerConfig(name="srv1", host="u@h")
+    async with app.run_test() as pilot:
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        assert collected == ["srv1"]
+
+
+async def test_A_generates_briefing_and_shows_prompt(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("A")
+        await pilot.pause()
+        briefs = list((tmp_path / "results").glob("briefing-*.md"))
+        assert len(briefs) == 1
+
+
 @requires_smoke_ssh
 async def test_real_localhost_end_to_end(tmp_path):
     """실제 SSH로 sync→discover→stats까지 한 바퀴 (send 없음, 읽기 전용)."""

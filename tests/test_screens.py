@@ -6,7 +6,7 @@ from textual.widgets import DataTable, Input, RichLog
 from cchub.config import Config
 from cchub.index import SessionIndex
 from cchub.tui.app import CchubApp
-from cchub.tui.screens import SearchScreen
+from cchub.tui.screens import SearchScreen, HistoryScreen
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_transcript.jsonl"
 
@@ -58,3 +58,27 @@ async def test_search_escape_closes(tmp_path):
         await pilot.press("slash")
         await pilot.press("escape")
         assert not isinstance(app.screen, SearchScreen)
+
+
+async def test_h_opens_history_with_rows(tmp_path):
+    app = make_indexed_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("h")
+        assert isinstance(app.screen, HistoryScreen)
+        table = app.screen.query_one("#history-table", DataTable)
+        assert table.row_count == 1     # s-1 세션
+
+
+async def test_history_filter_narrows(tmp_path):
+    app = make_indexed_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("h")
+        inp = app.screen.query_one("#history-filter", Input)
+        inp.focus()
+        inp.value = "없는키워드"
+        await pilot.pause()
+        table = app.screen.query_one("#history-table", DataTable)
+        assert table.row_count == 0
+        inp.value = "NUMA"
+        await pilot.pause()
+        assert table.row_count == 1

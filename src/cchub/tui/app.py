@@ -11,12 +11,14 @@ from textual.widgets import Footer, Input, RichLog, Static, Tree
 from textual.worker import get_current_worker
 
 from cchub import stats as stats_mod, tmux
+from cchub.briefing import generate_briefing
 from cchub.config import Config, cchub_dir, load_config
 from cchub.index import SessionIndex
+from cchub.results import collect_results
 from cchub.sessions import LiveSession
 from cchub.ssh import SSHRemote
 from cchub.tui.data import RemoteFactory, ServerSnapshot, collect_sessions
-from cchub.tui.screens import SearchScreen
+from cchub.tui.screens import SearchScreen, HistoryScreen
 
 
 class ConfirmSend(ModalScreen[bool]):
@@ -60,6 +62,9 @@ class CchubApp(App):
         Binding("f", "toggle_follow", "팔로우"),
         Binding("t", "toggle_transcript", "transcript"),
         Binding("slash", "search", "검색"),
+        Binding("h", "history", "이력"),
+        Binding("r", "collect_results", "결과수집"),
+        Binding("A", "brief", "브리핑"),
     ]
 
     _STATE_MARK = {"working": "●", "waiting": "◌", "idle": "▶", "unknown": "?"}
@@ -235,6 +240,43 @@ class CchubApp(App):
             if result:
                 self.open_transcript(*result)
         self.push_screen(SearchScreen(self.index), _open)
+
+    def action_history(self) -> None:
+        def _open(result: tuple[str, str] | None) -> None:
+            if result:
+                self.open_transcript(*result)
+        self.push_screen(HistoryScreen(self.index), _open)
+
+    def action_collect_results(self) -> None:
+        if not self.cfg.servers:
+            self.notify("설정된 서버가 없습니다", severity="warning")
+            return
+        self.collect_results_worker()
+
+    @work(thread=True, exclusive=True, group="results", exit_on_error=False)
+    def collect_results_worker(self) -> None:
+        worker = get_current_worker()
+        parts = []
+        for name in self.cfg.servers:
+            if worker.is_cancelled:
+                return
+            try:
+                rep = collect_results(self.cfg, self.root_dir, name, self.remote_factory)
+            except Exception as e:  # noqa: BLE001
+                parts.append(f"{name}: 오류 {e}")
+                continue
+            parts.append(f"{name}: {'ok' if rep.ok else '실패 ' + ', '.join(rep.failed)}")
+        if worker.is_cancelled:
+            return
+        self.call_from_thread(self.notify, "결과 수집 — " + "; ".join(parts))
+
+    def action_brief(self) -> None:
+        path, prompt = generate_briefing(self.cfg, self.root_dir, self.index)
+        self._write_detail(
+            f"브리핑 생성됨: {path}\n\n"
+            f"아래 프롬프트를 로컬 Claude Code 세션에 붙여넣으세요:\n\n{prompt}"
+        )
+        self.notify(f"브리핑 생성: {path.name}")
 
     def open_transcript(self, server: str, session_id: str) -> None:
         # 로컬 sqlite 조회는 ms 단위 — 워커 불필요
