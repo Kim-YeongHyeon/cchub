@@ -64,7 +64,7 @@ stats_interval = 2           # CPU/메모리 폴링 주기 (초)
 
 [servers.srv1]
 host = "user@10.0.0.11"      # ssh 접속 문자열
-results = ["~/exp/**", "~/bench/*.json"]   # 결과 수집 글롭 패턴 (선택)
+results = ["~/exp", "~/bench/*.json"]   # 결과 수집: 디렉토리(재귀) 또는 글롭 (선택)
 
 [servers.srv2]
 host = "my-alias"            # ~/.ssh/config 의 Host 별칭도 그대로 동작 (포트/키 포함)
@@ -133,7 +133,7 @@ cchub push ./data.json srv2:~/inbox           # 로컬 → 서버
 cchub push srv1:~/exp/out.json srv2:~/inbox   # 서버 → 서버 (로컬 경유, 임시파일 자동 정리)
 ```
 
-글롭(`srv1:~/exp/*.json`)은 원격 셸이 확장합니다.
+글롭(`srv1:~/exp/*.json`)은 원격 셸이 확장합니다. 참고: `**` 재귀 글롭은 원격 셸 설정(globstar)에 따라 한 단계 `*`처럼 동작할 수 있으니, 하위 폴더까지 전부 가져오려면 글롭 대신 디렉토리 자체를 지정하세요 (rsync가 재귀 복사).
 
 ### skill 통합 관리
 
