@@ -1,10 +1,19 @@
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from cchub import skills
 from cchub.ssh import RunResult
 from conftest import FakeRemote
 
 FIXTURE_SKILL = Path(__file__).parent / "fixtures" / "sample_skill"
+
+requires_smoke_ssh = pytest.mark.skipif(
+    subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2",
+                    "cchub-smoke", "true"], capture_output=True).returncode != 0,
+    reason="cchub-smoke ssh alias 불가",
+)
 
 SCAN_OUT = (
     "personal\t/home/u/.claude/skills/my-skill/SKILL.md\t개인 스킬 설명\n"
@@ -124,3 +133,30 @@ def test_delete_skill_rejects_bad_name():
     fake = FakeRemote()
     r = skills.delete_skill(fake, "../../etc")
     assert r.rc != 0 and fake.calls == []
+
+
+@requires_smoke_ssh
+def test_real_scan_and_deploy_roundtrip(tmp_path):
+    """실제 SSH로 스캔 + 스크래치 스킬 deploy→재스캔→delete 왕복 (실제 스킬은 불변)."""
+    from cchub.ssh import SSHRemote
+
+    remote = SSHRemote("cchub-smoke")
+    # 1) 프로젝트 스킬 스캔 (skill_paths로 envector-msa 지정 — pane cwd 무관하게 보장)
+    found = skills.scan_skills(remote, "local", [], ["~/envector-msa"])
+    assert any(s.name == "e2e-run" and s.scope == "project" for s in found)
+    assert all(s.description for s in found if s.name == "e2e-run")
+
+    # 2) 스크래치 스킬 왕복 (고유 이름으로 실제 개인 스킬과 충돌 방지)
+    name = "cchub-smoke-roundtrip"
+    lib = tmp_path / "lib"
+    (lib / name).mkdir(parents=True)
+    (lib / name / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: cchub M4 스모크 테스트용 임시 스킬\n---\n")
+    try:
+        assert skills.deploy_skill(remote, lib, name).rc == 0
+        found = skills.scan_skills(remote, "local", [], [])
+        assert any(s.name == name and s.scope == "personal" for s in found)
+    finally:
+        assert skills.delete_skill(remote, name).rc == 0
+    found = skills.scan_skills(remote, "local", [], [])
+    assert not any(s.name == name for s in found)

@@ -1,12 +1,14 @@
 # cchub
 
-버전 0.3.0. 여러 서버에서 돌아가는 Claude Code 세션을 한 곳에서
+버전 0.4.0. 여러 서버에서 돌아가는 Claude Code 세션을 한 곳에서
 확인·검색·제어하는 CLI. 각 서버에 SSH로 접속해 `~/.claude/projects`를
 로컬로 미러링하고, tmux pane을 찾아 실행 중인 세션과 매칭한다. 0.2.0부터는
 `cchub tui`로 여러 서버의 세션을 한 화면에서 볼 수 있는 인터랙티브 뷰를
 제공한다 (의존성 `textual>=8,<9`). 0.3.0에서는 전 서버 통합 이력(`h`)·전문
 검색(`/`), 실험 결과 수집(`r`/`cchub results`), 종합 브리핑 생성(`A`/`cchub brief`),
-서버 간 파일 중계(`cchub push`)가 추가됐다.
+서버 간 파일 중계(`cchub push`)가 추가됐다. 0.4.0에서는 서버별 skill(개인+
+프로젝트) 조회/가져오기/배포/서버 간 복사/삭제(`cchub skills ...`, TUI `s`)가
+추가됐다.
 
 ## 설치
 
@@ -38,6 +40,7 @@ results = ["~/exp/**"]       # 결과 수집 경로 — cchub results/r로 미�
 [servers.srv2]
 host = "my-alias"            # 예: ~/.ssh/config에 등록된 Host my-alias
 claude_dir = "~/.claude"      # 원격의 claude 홈 (기본값)
+skill_paths = ["~/envector-msa"]  # 프로젝트 skill 스캔 추가 경로 (활성 pane cwd 외)
 ```
 
 `host`는 `ssh <host>`로 그대로 넘어가므로, `user@ip`든 `~/.ssh/config`의
@@ -58,6 +61,11 @@ claude_dir = "~/.claude"      # 원격의 claude 홈 (기본값)
 | `cchub results [server]` | config의 `results` 패턴에 따라 실험 결과 파일을 `~/.cchub/results/<server>/`로 수집한다 (생략 시 전체 서버) |
 | `cchub brief` | 수집된 결과 + 최근 세션 요약을 담은 브리핑 md를 생성하고, 로컬 Claude Code에 붙여넣을 프롬프트를 출력한다 |
 | `cchub push <src> <dst>` | 서버 간/로컬 파일을 중계한다. `<서버>:<경로>` 또는 로컬 경로를 받으며, 서버↔서버 전송은 로컬을 경유한다 |
+| `cchub skills list [server]` | 로컬 라이브러리(`~/.claude/skills`) + 지정 서버(생략 시 전체)의 개인/프로젝트 skill을 나열한다 |
+| `cchub skills pull <server> <name> [--force]` | 서버의 skill(개인 우선, 없으면 유일한 프로젝트 skill)을 로컬 라이브러리로 가져온다 |
+| `cchub skills deploy <name> <servers...>` | 로컬 라이브러리의 skill을 서버들의 **개인 skill**로 배포한다(덮어쓰기, `--delete` 없음) |
+| `cchub skills copy <src_server> <name> <dst_servers...>` | 한 서버의 skill을 로컬 경유로 다른 서버들의 개인 skill로 복사한다 |
+| `cchub skills delete <server> <name> [--yes]` | 서버의 개인 skill을 삭제한다. `--yes` 없으면 skill 이름을 다시 입력해야 확인된다 |
 
 ## TUI (`cchub tui`)
 
@@ -83,6 +91,7 @@ cchub tui
 | `h` | 전 서버 통합 이력(타임라인) 모달을 연다. 입력창에 서버/프로젝트/제목 부분 문자열로 즉시 필터링한다 |
 | `r` | config의 `results` 패턴에 따라 등록된 모든 서버의 실험 결과를 수집한다 (`cchub results`와 동일 동작, 백그라운드 워커) |
 | `A` | 수집된 결과 + 최근 세션을 종합한 브리핑 md를 생성하고, 로컬 Claude Code에 붙여넣을 프롬프트를 상세 패널에 띄운다 (`cchub brief`와 동일) |
+| `s` | 로컬 라이브러리 + 전 서버(활성 pane cwd·`skill_paths` 기준)의 skill을 조회하는 화면을 연다 (읽기 전용 — 배포/삭제는 `cchub skills`로) |
 | `Enter` (입력창) | 프롬프트를 선택된 세션에 전송. 세션이 작업 중(●)이면 `y`/`n` 확인 후 전송 |
 
 ## 결과 수집·종합 워크플로우
@@ -103,6 +112,30 @@ cchub tui
 4. 특정 파일만 다른 서버(또는 로컬)로 옮기고 싶으면 `cchub push <src> <dst>`를
    쓴다. 인자는 `<서버>:<경로>` 또는 로컬 경로이며, 서버 간(A→B) 전송은
    중간에 로컬을 경유한다 (서버끼리 직접 통신하지 않는다).
+
+## skill 통합 관리
+
+여러 서버에 흩어진 Claude Code skill(`SKILL.md` 디렉터리)을 한 곳에서
+조회·이동시키는 기능. `cchub skills` 서브커맨드와 TUI `s` 화면으로 접근한다.
+
+- **로컬 라이브러리**: `~/.claude/skills` (cchub를 실행하는 로컬 머신의 개인
+  skill 디렉터리)를 그대로 라이브러리로 쓴다. `pull`은 여기로 받고, `deploy`/
+  `copy`는 여기서 보낸다.
+- **조회는 개인 + 프로젝트 skill 모두 대상**이다. 서버 하나당 skill 스캔은
+  다음 두 경로를 합쳐서 이뤄진다: (1) 그 서버에서 현재 tmux에 살아있는 claude
+  pane들의 작업 디렉터리(cwd) 아래 `.claude/skills`, (2) config의
+  `[servers.*].skill_paths`에 직접 등록한 경로들. 즉 pane이 꺼져 있어도
+  `skill_paths`에 넣어두면 계속 조회된다.
+- **쓰기(배포/삭제)는 개인 skill만 대상**이다 — 프로젝트 skill은 그 프로젝트의
+  git 저장소로 관리되는 것이 원칙이라 cchub에서 만들거나 지우지 않는다
+  (`deploy`/`delete` 모두 경로가 `~/.claude/skills/<name>`으로 고정돼 있어
+  프로젝트 skill 경로에는 애초에 쓸 수 없다).
+- **`deploy`/`copy`는 `rsync`로 덮어쓰는 방식이라 `--delete`를 쓰지 않는다** —
+  로컬에서 파일을 지운 뒤 재배포해도 서버에는 예전 파일이 그대로 남을 수
+  있다. 파일을 완전히 갈아엎으려면 `delete` 후 다시 `deploy`한다.
+- **`delete`는 실수 방지를 위해 skill 이름을 다시 입력하는 확인**을 거친다
+  (`--yes`로 건너뛸 수 있음). 이름 검증(`[A-Za-z0-9_-]+`)과 고정 경로 프리픽스
+  덕분에 `../` 등으로 다른 경로를 지울 수 없다.
 
 ## 데이터 위치
 
@@ -150,3 +183,15 @@ M3에서는 같은 `cchub-smoke` 서버로 TUI의 `h`(이력)/`/`(검색)/`A`(�
 검색에 실제 이력에서 매칭이 나오며, `A`로 실제 최근 세션 요약이 담긴
 브리핑 md가 로컬에 생성됨을 확인했다 (`r`은 이 서버의 config에 `results`
 패턴이 없어 별도 확인하지 않음).
+
+M4에서는 skill 기능을 같은 서버의 실제 데이터로 검증했다: `skill_paths`로
+`~/envector-msa`를 지정해 실제 프로젝트 skill 9개(예: `e2e-run`, description
+포함)를 정상 스캔했고, 고유한 이름(`cchub-smoke-roundtrip`)의 임시 skill을
+개인 skill로 `deploy` → 재스캔으로 확인 → `delete`하는 왕복까지 성공했다
+(테스트 종료 후 서버의 `~/.claude/skills`는 다시 비어 있음). 이 과정에서
+서버의 `~/.claude/skills`가 존재하지 않는 디렉터리(`~/.code-assistant/claude/skills`)를
+가리키는 깨진 심볼릭 링크였던 사실을 발견했다 — cchub 코드의 결함은
+아니었지만(`mkdir -p`가 깨진 심볼릭 링크 경로 아래로는 쓸 수 없는 건 정상
+동작), 그 상태로는 개인 skill 배포 자체가 불가능해 심볼릭 링크가 가리키는
+빈 디렉터리를 생성해 링크를 유효하게 만들었다(그 안의 내용물은 건드리지
+않음).
