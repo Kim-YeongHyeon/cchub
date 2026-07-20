@@ -4,7 +4,13 @@ from dataclasses import dataclass
 
 from cchub.ssh import Remote
 
-_FMT = "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_path}\t#{pane_current_command}"
+_FMT = (
+    "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}"
+    "\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}"
+)
+
+# claude는 실행 방식에 따라 claude 또는 node로 보인다 (sessions와 공유)
+CLAUDE_COMMANDS = {"claude", "node"}
 
 
 @dataclass
@@ -13,6 +19,7 @@ class Pane:
     location: str   # 예: main:1.0 (사람이 읽는 위치)
     cwd: str
     command: str
+    pid: str        # pane 최상위 프로세스 pid
 
 
 def list_panes(remote: Remote) -> list[Pane]:
@@ -22,7 +29,7 @@ def list_panes(remote: Remote) -> list[Pane]:
     panes = []
     for line in r.out.splitlines():
         parts = line.split("\t")
-        if len(parts) == 4:
+        if len(parts) == 5:
             panes.append(Pane(*parts))
     return panes
 

@@ -4,8 +4,8 @@ from conftest import FakeRemote
 
 
 PANES_OUT = (
-    "%0\tmain:0.0\t/home/u/proj\tclaude\n"
-    "%3\tmain:1.0\t/home/u/other\tbash\n"
+    "%0\tmain:0.0\t/home/u/proj\tclaude\t100\n"
+    "%3\tmain:1.0\t/home/u/other\tbash\t200\n"
     "잘못된 줄\n"
 )
 
@@ -14,11 +14,11 @@ def test_list_panes_parses_and_skips_bad_lines():
     fake = FakeRemote({"tmux": RunResult(0, PANES_OUT, "")})
     panes = tmux.list_panes(fake)
     assert len(panes) == 2
-    assert panes[0] == tmux.Pane("%0", "main:0.0", "/home/u/proj", "claude")
+    assert panes[0] == tmux.Pane("%0", "main:0.0", "/home/u/proj", "claude", "100")
     assert fake.calls[0] == ["tmux", "list-panes", "-a", "-F", tmux._FMT]
     assert tmux._FMT == (
         "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}"
-        "\t#{pane_current_path}\t#{pane_current_command}"
+        "\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}"
     )
 
 

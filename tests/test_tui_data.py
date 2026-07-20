@@ -8,7 +8,7 @@ from cchub.tui.data import collect_sessions
 from conftest import FakeRemote
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_transcript.jsonl"
-PANES = "%5\tmain:0.0\t/home/u/proj\tclaude\n"
+PANES = "%5\tmain:0.0\t/home/u/proj\tclaude\t100\n"
 
 
 def make_env(tmp_path):
