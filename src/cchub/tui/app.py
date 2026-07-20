@@ -195,6 +195,8 @@ class CchubApp(App):
         worker = get_current_worker()
         labels = []
         for name, s in self.cfg.servers.items():
+            if worker.is_cancelled:
+                return
             tracker = self.server_stats.setdefault(name, stats_mod.ServerStats())
             tracker.update(stats_mod.read_stats(self.remote_factory(s.host)))
             labels.append(tracker.label(name))

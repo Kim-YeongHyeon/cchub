@@ -174,6 +174,37 @@ async def test_poll_stats_skips_ui_update_when_cancelled(tmp_path, monkeypatch):
         assert str(bar.content) == before   # 취소된 워커는 stats bar를 갱신하지 않음
 
 
+async def test_poll_stats_cancel_mid_loop_stops_tracker_updates(tmp_path, monkeypatch):
+    """루프 도중 취소되면 남은 서버의 tracker.update가 실행되지 않는다."""
+    import cchub.tui.app as app_mod
+
+    app = make_app(tmp_path)
+    from cchub.config import ServerConfig
+    app.cfg.servers["a"] = ServerConfig(name="a", host="u@a")
+    app.cfg.servers["b"] = ServerConfig(name="b", host="u@b")
+
+    calls = []
+
+    class FakeWorker:
+        def __init__(self):
+            self._n = 0
+
+        @property
+        def is_cancelled(self):
+            # 첫 iteration 후부터 취소된 것으로 응답
+            self._n += 1
+            return self._n > 1
+
+    monkeypatch.setattr(app_mod, "get_current_worker", lambda: FakeWorker())
+    monkeypatch.setattr(app_mod.stats_mod, "read_stats",
+                        lambda remote: calls.append(1) or None)
+    app.remote_factory = lambda h: None
+    async with app.run_test() as pilot:
+        app.poll_stats()
+        await app.workers.wait_for_complete()
+        assert len(calls) <= 1  # 두 번째 서버는 폴링되지 않음
+
+
 async def test_refresh_detail_skips_write_when_cancelled(tmp_path, monkeypatch):
     import cchub.tui.app as app_mod
 

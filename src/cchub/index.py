@@ -121,14 +121,13 @@ class SessionIndex:
             self.db.commit()
             return n
 
-    def _forget(self, server: str, session_id: str) -> None:
-        self.db.execute(
-            "DELETE FROM sessions WHERE server=? AND session_id=?", (server, session_id)
-        )
-        self.db.execute(
-            "DELETE FROM messages WHERE server=? AND session_id=?", (server, session_id)
-        )
+    def _delete_rows(self, where: str, params: tuple) -> None:
+        self.db.execute(f"DELETE FROM sessions WHERE {where}", params)
+        self.db.execute(f"DELETE FROM messages WHERE {where}", params)
         self.db.commit()
+
+    def _forget(self, server: str, session_id: str) -> None:
+        self._delete_rows("server=? AND session_id=?", (server, session_id))
 
     def get_session(self, server: str, session_id: str) -> SessionRow | None:
         with self._lock:
@@ -185,6 +184,4 @@ class SessionIndex:
 
     def forget_all(self) -> None:
         with self._lock:
-            self.db.execute("DELETE FROM sessions")
-            self.db.execute("DELETE FROM messages")
-            self.db.commit()
+            self._delete_rows("1=1", ())
