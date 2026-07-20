@@ -16,6 +16,7 @@ from cchub.index import SessionIndex
 from cchub.sessions import LiveSession
 from cchub.ssh import SSHRemote
 from cchub.tui.data import RemoteFactory, ServerSnapshot, collect_sessions
+from cchub.tui.screens import SearchScreen
 
 
 class ConfirmSend(ModalScreen[bool]):
@@ -58,6 +59,7 @@ class CchubApp(App):
         Binding("c", "toggle_stats", "CPU바"),
         Binding("f", "toggle_follow", "팔로우"),
         Binding("t", "toggle_transcript", "transcript"),
+        Binding("slash", "search", "검색"),
     ]
 
     _STATE_MARK = {"working": "●", "waiting": "◌", "idle": "▶", "unknown": "?"}
@@ -227,6 +229,18 @@ class CchubApp(App):
         self.transcript_mode = not self.transcript_mode
         self.notify(f"transcript 모드 {'ON' if self.transcript_mode else 'OFF(live)'}")
         self.show_detail()
+
+    def action_search(self) -> None:
+        def _open(result: tuple[str, str] | None) -> None:
+            if result:
+                self.open_transcript(*result)
+        self.push_screen(SearchScreen(self.index), _open)
+
+    def open_transcript(self, server: str, session_id: str) -> None:
+        # 로컬 sqlite 조회는 ms 단위 — 워커 불필요
+        rows = self.index.tail(server, session_id, limit=50)
+        text = "\n".join(f"── {r} {t}\n{b}" for r, t, b in rows) or "(transcript 없음)"
+        self._write_detail(f"[{server} / {session_id[:8]}]\n{text}")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
