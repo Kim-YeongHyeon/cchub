@@ -376,9 +376,12 @@ class CchubApp(App):
             row.mount(RichLog(id="detail-1", wrap=True, markup=False, highlight=False))
             self.call_after_refresh(self._update_active_classes)
         else:
+            self.workers.cancel_group(self, "detail-1")   # 진행 중 낡은 워커 무효화
             self.query_one("#detail-1", RichLog).remove()
             self.panes.pop()
             self.active = 0
+            if not any(p.follow_on for p in self.panes):
+                self._follow_timer.pause()
             self._update_active_classes()
 
     def action_switch_pane(self) -> None:

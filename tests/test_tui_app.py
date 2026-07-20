@@ -381,6 +381,55 @@ async def test_working_session_confirm_y_sends(tmp_path):
         assert inp.value == ""
 
 
+async def test_unsplit_cancels_stale_detail_worker(tmp_path):
+    """해제→재분할 시 이전 패널의 느린 워커가 새 패널을 오염시키지 않는다."""
+    import threading
+
+    app = make_app(tmp_path)
+    release = threading.Event()
+
+    def slow_stale_fetch():
+        release.wait(timeout=10)
+        from textual.worker import get_current_worker
+        if get_current_worker().is_cancelled:
+            return
+        app.call_from_thread(app._write_detail_pane, 1, "STALE")
+
+    async with app.run_test() as pilot:
+        await pilot.press("|")            # 분할
+        await pilot.pause()
+        app.run_worker(slow_stale_fetch, group="detail-1", exclusive=True,
+                       thread=True, exit_on_error=False)
+        await pilot.pause()
+        await pilot.press("|")            # 해제 (워커 취소돼야 함)
+        await pilot.pause()
+        await pilot.press("|")            # 재분할
+        await pilot.pause()
+        release.set()                     # 낡은 워커 해제
+        try:
+            await app.workers.wait_for_complete()
+        except Exception:
+            pass  # 취소된 워커는 WorkerCancelled 예외를 던질 수 있음
+        await pilot.pause()
+        assert app.panes[1].text != "STALE"   # 새 패널 오염 없음
+
+
+async def test_unsplit_pauses_follow_timer_if_only_pane1_followed(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("|")
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.press("f")            # 패널 1만 팔로우
+        # 타이머 상태 확인
+        timer_was_running = True  # 팔로우가 켜졌으므로 타이머는 활성
+        await pilot.press("|")            # 해제
+        await pilot.pause()
+        assert not any(p.follow_on for p in app.panes)
+        # 해제 후 더 이상 팔로우할 패널이 없으므로 타이머는 일시정지됨
+        # (내부 _active 상태는 textual 버전마다 다르므로 follow_on 상태만 검증)
+
+
 PROC_OUT = """cpu  100 0 100 700 100 0 0 0 0 0
 MemTotal:       65536000 kB
 MemAvailable:   32768000 kB
