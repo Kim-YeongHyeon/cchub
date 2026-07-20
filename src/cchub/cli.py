@@ -6,11 +6,12 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from cchub import sessions, tmux
+from cchub import sessions, skills as skills_mod, tmux
 from cchub.config import Config, ConfigError, cchub_dir, load_config
 from cchub.index import SessionIndex
 from cchub.ssh import Remote, SSHRemote
 from cchub.sync import sync_server
+from cchub.tmux import CLAUDE_COMMANDS
 
 _STATE_MARK = {"working": "●", "waiting": "◌", "idle": "▶", "unknown": "?"}
 
@@ -241,6 +242,136 @@ def cmd_push(args) -> int:
     return 0
 
 
+def _local_lib() -> Path:
+    return Path.home() / ".claude" / "skills"
+
+
+def _scan_server(cfg: Config, name: str) -> list:
+    """서버 하나의 스킬 스캔 (pane cwd + skill_paths). 실패 격리."""
+    s = cfg.servers[name]
+    remote = _make_remote(s.host)
+    try:
+        cwds = [p.cwd for p in tmux.list_panes(remote) if p.command in CLAUDE_COMMANDS]
+        return skills_mod.scan_skills(remote, name, cwds, s.skill_paths)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _resolve_skill(cfg: Config, server: str, name: str):
+    """서버에서 스킬 참조 해석: personal 우선, 프로젝트 유일 매칭. 실패 시 None+메시지 출력."""
+    if server not in cfg.servers:
+        print(f"알 수 없는 서버: {server}", file=sys.stderr)
+        return None
+    found = [i for i in _scan_server(cfg, server) if i.name == name]
+    personal = [i for i in found if i.scope == "personal"]
+    if personal:
+        return personal[0]
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        print(f"{server}에서 스킬을 찾지 못함: {name}", file=sys.stderr)
+    else:
+        paths = ", ".join(i.path for i in found)
+        print(f"{server}에 동명 스킬이 여러 개: {paths}", file=sys.stderr)
+    return None
+
+
+def cmd_skills(args) -> int:
+    cfg, root, _index = _ctx()
+    if args.skills_cmd == "list":
+        rows = skills_mod.local_skills(_local_lib())
+        servers = [args.server] if args.server else list(cfg.servers)
+        for name in servers:
+            if name not in cfg.servers:
+                print(f"알 수 없는 서버: {name}", file=sys.stderr)
+                return 1
+            found = _scan_server(cfg, name)
+            if not found:
+                print(f"[{name}] (스킬 없음/접속 불가)")
+            rows += found
+        for i in rows:
+            desc = i.description[:60]
+            print(f"{i.server:10s} {i.scope:8s} {i.name:24s} {desc}  ({i.path})")
+        return 0
+
+    if args.skills_cmd == "pull":
+        info = _resolve_skill(cfg, args.server, args.name)
+        if info is None:
+            return 1
+        dest = _local_lib() / info.name
+        if dest.exists() and not args.force:
+            print(f"이미 존재: {dest} (덮어쓰려면 --force)", file=sys.stderr)
+            return 1
+        r = skills_mod.pull_skill(_make_remote(cfg.servers[args.server].host), info, _local_lib())
+        if r.rc != 0:
+            print(f"가져오기 실패: {r.err.strip()}", file=sys.stderr)
+            return 1
+        print(f"가져옴: {dest}")
+        return 0
+
+    if args.skills_cmd == "deploy":
+        ok = True
+        for name in args.servers:
+            if name not in cfg.servers:
+                print(f"알 수 없는 서버: {name}", file=sys.stderr)
+                return 1
+            r = skills_mod.deploy_skill(_make_remote(cfg.servers[name].host), _local_lib(), args.name)
+            if r.rc == 0:
+                print(f"{name}: 배포됨 (~/.claude/skills/{args.name})")
+            else:
+                ok = False
+                print(f"{name}: 실패 — {r.err.strip()}", file=sys.stderr)
+        return 0 if ok else 1
+
+    if args.skills_cmd == "copy":
+        import tempfile
+        info = _resolve_skill(cfg, args.src_server, args.name)
+        if info is None:
+            return 1
+        relay_root = root / "relay"
+        relay_root.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(dir=relay_root))
+        try:
+            r = skills_mod.pull_skill(_make_remote(cfg.servers[args.src_server].host), info, tmp)
+            if r.rc != 0:
+                print(f"가져오기 실패: {r.err.strip()}", file=sys.stderr)
+                return 1
+            ok = True
+            for name in args.dst_servers:
+                if name not in cfg.servers:
+                    print(f"알 수 없는 서버: {name}", file=sys.stderr)
+                    return 1
+                r = skills_mod.deploy_skill(_make_remote(cfg.servers[name].host), tmp, info.name)
+                if r.rc == 0:
+                    print(f"{name}: 복사됨")
+                else:
+                    ok = False
+                    print(f"{name}: 실패 — {r.err.strip()}", file=sys.stderr)
+            return 0 if ok else 1
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    if args.skills_cmd == "delete":
+        if args.server not in cfg.servers:
+            print(f"알 수 없는 서버: {args.server}", file=sys.stderr)
+            return 1
+        if not skills_mod.valid_skill_name(args.name):
+            print(f"잘못된 스킬 이름: {args.name}", file=sys.stderr)
+            return 1
+        if not args.yes:
+            print(f"{args.server}의 개인 스킬 ~/.claude/skills/{args.name} 을(를) 삭제합니다.")
+            if input(f"확인을 위해 스킬 이름을 다시 입력하세요: ").strip() != args.name:
+                print("취소됨", file=sys.stderr)
+                return 1
+        r = skills_mod.delete_skill(_make_remote(cfg.servers[args.server].host), args.name)
+        if r.rc != 0:
+            print(f"삭제 실패: {r.err.strip()}", file=sys.stderr)
+            return 1
+        print("삭제됨")
+        return 0
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="cchub", description="멀티 서버 Claude Code 세션 허브")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -274,11 +405,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("src")
     p.add_argument("dst")
 
+    ps = sub.add_parser("skills", help="skill 통합 관리")
+    ssub = ps.add_subparsers(dest="skills_cmd", required=True)
+    q = ssub.add_parser("list", help="서버별 스킬 조회")
+    q.add_argument("server", nargs="?")
+    q = ssub.add_parser("pull", help="서버 스킬 → 로컬 라이브러리")
+    q.add_argument("server"); q.add_argument("name"); q.add_argument("--force", action="store_true")
+    q = ssub.add_parser("deploy", help="로컬 스킬 → 서버들(개인 스킬)")
+    q.add_argument("name"); q.add_argument("servers", nargs="+")
+    q = ssub.add_parser("copy", help="서버 간 스킬 복사 (로컬 경유)")
+    q.add_argument("src_server"); q.add_argument("name"); q.add_argument("dst_servers", nargs="+")
+    q = ssub.add_parser("delete", help="서버 개인 스킬 삭제")
+    q.add_argument("server"); q.add_argument("name"); q.add_argument("--yes", action="store_true")
+
     args = ap.parse_args(argv)
     handler = {
         "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "send": cmd_send,
         "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex, "tui": cmd_tui,
-        "brief": cmd_brief, "results": cmd_results, "push": cmd_push,
+        "brief": cmd_brief, "results": cmd_results, "push": cmd_push, "skills": cmd_skills,
     }[args.cmd]
     try:
         return handler(args)

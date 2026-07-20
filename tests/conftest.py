@@ -26,6 +26,12 @@ class FakeRemote(Remote):
 
     def fetch(self, remote_path: str, local_dir, timeout: int = 300) -> RunResult:
         self.fetches.append((remote_path, Path(local_dir)))
+        # Simulate fetching skill directories
+        if "/.claude/skills/" in remote_path:
+            skill_name = remote_path.rstrip("/").split("/")[-1]
+            skill_dir = Path(local_dir) / skill_name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text("---\nname: " + skill_name + "\ndescription: 원격 스킬\n---\n")
         return RunResult(0, "", "")
 
     def push(self, local_path, remote_dir: str, timeout: int = 300) -> RunResult:
