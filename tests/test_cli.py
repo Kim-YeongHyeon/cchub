@@ -96,3 +96,10 @@ def test_results_command(env, capsys):
     tmp, fake = env
     assert cli.main(["results", "srv1"]) == 0
     assert "srv1" in capsys.readouterr().out
+
+
+def test_brief_command(env, capsys):
+    cli.main(["sync"])
+    assert cli.main(["brief"]) == 0
+    out = capsys.readouterr().out
+    assert "briefing-" in out and "붙여넣" in out

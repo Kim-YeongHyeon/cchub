@@ -175,6 +175,18 @@ def cmd_tui(_args) -> int:
     return 0
 
 
+def cmd_brief(_args) -> int:
+    from cchub.briefing import generate_briefing
+    cfg, root, index = _ctx()
+    path, prompt = generate_briefing(cfg, root, index)
+    print(f"브리핑 생성됨: {path}")
+    print()
+    print("아래 프롬프트를 로컬 Claude Code 세션에 붙여넣으세요:")
+    print()
+    print(prompt)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="cchub", description="멀티 서버 Claude Code 세션 허브")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -199,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("reindex", help="캐시에서 인덱스 재구축")
     sub.add_parser("tui", help="터미널 UI 실행")
+    sub.add_parser("brief", help="수집 결과 종합 브리핑 생성")
 
     p = sub.add_parser("results", help="실험 결과 수집 (config의 results 패턴)")
     p.add_argument("server", nargs="?", help="생략 시 전체 서버")
@@ -207,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     handler = {
         "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "send": cmd_send,
         "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex, "tui": cmd_tui,
-        "results": cmd_results,
+        "brief": cmd_brief, "results": cmd_results,
     }[args.cmd]
     try:
         return handler(args)
