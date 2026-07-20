@@ -489,3 +489,19 @@ async def test_real_localhost_history_search_brief(tmp_path):
         await pilot.press("A")                   # 브리핑 생성 (로컬 파일만)
         await pilot.pause()
         assert list((tmp_path / "results").glob("briefing-*.md"))
+
+
+async def test_pane_state_backs_legacy_attrs(tmp_path):
+    """selected/transcript_mode/follow_on이 PaneState[active]를 통해 동작한다."""
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        assert len(app.panes) == 1 and app.active == 0
+        app.apply_snapshots(snap())
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        assert app.panes[0].session is app.selected
+        await pilot.press("t")
+        assert app.panes[0].transcript_mode is True
+        await pilot.press("f")
+        assert app.panes[0].follow_on is True
+        app._write_detail("내용 확인")
+        assert app.panes[0].text == "내용 확인"

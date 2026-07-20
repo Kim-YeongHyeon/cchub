@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from textual import work
@@ -48,6 +49,14 @@ class ConfirmSend(ModalScreen[bool]):
         self.dismiss(False)
 
 
+@dataclass
+class PaneState:
+    session: LiveSession | None = None
+    transcript_mode: bool = False
+    follow_on: bool = False
+    text: str = ""
+
+
 class CchubApp(App):
     TITLE = "cchub"
     CSS = """
@@ -84,12 +93,35 @@ class CchubApp(App):
         self.root_dir = root or cchub_dir()
         self.index = index or SessionIndex(self.root_dir / "index.db")
         self.remote_factory = remote_factory
+        self.panes: list[PaneState] = [PaneState()]
+        self.active: int = 0
+
+    @property
+    def selected(self) -> LiveSession | None:
+        return self.panes[self.active].session
+
+    @selected.setter
+    def selected(self, value: LiveSession | None) -> None:
+        self.panes[self.active].session = value
+
+    @property
+    def transcript_mode(self) -> bool:
+        return self.panes[self.active].transcript_mode
+
+    @transcript_mode.setter
+    def transcript_mode(self, value: bool) -> None:
+        self.panes[self.active].transcript_mode = value
+
+    @property
+    def follow_on(self) -> bool:
+        return self.panes[self.active].follow_on
+
+    @follow_on.setter
+    def follow_on(self, value: bool) -> None:
+        self.panes[self.active].follow_on = value
 
     def on_mount(self) -> None:
-        self.selected: LiveSession | None = None
         self.snapshots: dict[str, ServerSnapshot] = {}
-        self.transcript_mode = False
-        self.follow_on = False
         self._follow_timer = self.set_interval(2, self._follow_tick, pause=True)
         self.set_interval(self.cfg.sync_interval, self.action_refresh)
         self.stats_on = True
@@ -138,34 +170,44 @@ class CchubApp(App):
         self._reconcile_selection(tree)
 
     def _reconcile_selection(self, tree: Tree) -> None:
-        if self.selected is None:
-            return
-        key = (self.selected.server, self.selected.pane_id)
-        for server_node in tree.root.children:
-            for leaf in server_node.children:
+        leaves = [leaf for node in tree.root.children for leaf in node.children]
+        for i, state in enumerate(self.panes):
+            if state.session is None:
+                continue
+            key = (state.session.server, state.session.pane_id)
+            for leaf in leaves:
                 ls = leaf.data
                 if ls is not None and (ls.server, ls.pane_id) == key:
-                    self.selected = ls
-                    tree.select_node(leaf)
-                    return
-        self.selected = None
+                    state.session = ls
+                    if i == self.active:
+                        tree.select_node(leaf)
+                    break
+            else:
+                state.session = None
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         if event.node.data is not None:
             self.selected = event.node.data
         self.show_detail()
 
-    def show_detail(self) -> None:
-        if self.selected is not None:
-            self.refresh_detail()
+    def _detail_log(self, i: int) -> RichLog:
+        return self.query_one("#detail" if i == 0 else "#detail-1", RichLog)
 
-    @work(thread=True, exclusive=True, group="detail", exit_on_error=False)
-    def refresh_detail(self) -> None:
+    def show_detail(self, pane: int | None = None) -> None:
+        i = self.active if pane is None else pane
+        if i < len(self.panes) and self.panes[i].session is not None:
+            self.run_worker(
+                lambda: self._fetch_detail(i),
+                group=f"detail-{i}", exclusive=True, thread=True, exit_on_error=False,
+            )
+
+    def _fetch_detail(self, i: int) -> None:
         worker = get_current_worker()
-        ls = self.selected
+        state = self.panes[i]
+        ls = state.session
         if ls is None:
             return
-        if self.transcript_mode:
+        if state.transcript_mode:
             try:
                 rows = (
                     self.index.tail(ls.server, ls.session_id, limit=30)
@@ -189,16 +231,23 @@ class CchubApp(App):
                 return
         if worker.is_cancelled:
             return
-        self.call_from_thread(self._write_detail, text)
+        self.call_from_thread(self._write_detail_pane, i, text)
 
-    def _write_detail(self, text: str) -> None:
-        log = self.query_one("#detail", RichLog)
+    def _write_detail_pane(self, i: int, text: str) -> None:
+        if i >= len(self.panes):
+            return
+        self.panes[i].text = text
+        log = self._detail_log(i)
         log.clear()
         log.write(text)
 
+    def _write_detail(self, text: str) -> None:
+        self._write_detail_pane(self.active, text)
+
     def _follow_tick(self) -> None:
-        if self.follow_on and not self.transcript_mode:
-            self.show_detail()
+        for i, state in enumerate(self.panes):
+            if state.follow_on and not state.transcript_mode and state.session:
+                self.show_detail(i)
 
     @work(thread=True, exclusive=True, group="stats", exit_on_error=False)
     def poll_stats(self) -> None:
@@ -227,7 +276,7 @@ class CchubApp(App):
 
     def action_toggle_follow(self) -> None:
         self.follow_on = not self.follow_on
-        if self.follow_on:
+        if any(p.follow_on for p in self.panes):
             self._follow_timer.resume()
         else:
             self._follow_timer.pause()
