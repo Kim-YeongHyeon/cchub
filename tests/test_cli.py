@@ -51,6 +51,14 @@ def test_send_resolves_number_and_sends(env, capsys):
     assert sent[1][-1] == "Enter"
 
 
+def test_send_confirms_delivery(env, capsys):
+    tmp, fake = env
+    fake.responses[("tmux", "capture-pane")] = RunResult(0, "실험 시작해줘\n", "")
+    assert cli.main(["send", "srv1", "1", "실험 시작해줘"]) == 0
+    out = capsys.readouterr().out
+    assert "전송됨" in out
+
+
 def test_send_bad_number_fails(env, capsys):
     assert cli.main(["send", "srv1", "9", "x"]) == 1
     assert "세션 9" in capsys.readouterr().err

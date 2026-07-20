@@ -44,3 +44,19 @@ def send_prompt(remote: Remote, pane_id: str, text: str) -> bool:
 def capture(remote: Remote, pane_id: str, lines: int = 100) -> str:
     r = remote.run(["tmux", "capture-pane", "-p", "-t", pane_id, "-S", f"-{lines}"])
     return r.out if r.rc == 0 else ""
+
+
+def verify_pane(remote: Remote, pane_id: str) -> bool:
+    """전송 직전: pane이 존재하고 claude 계열 프로세스인지 확인."""
+    return any(
+        p.pane_id == pane_id and p.command in CLAUDE_COMMANDS
+        for p in list_panes(remote)
+    )
+
+
+def confirm_delivery(remote: Remote, pane_id: str, text: str) -> bool:
+    """전송 후 1회: 텍스트 앞부분이 화면에 보이는지 (best-effort, 래핑 시 미검출 가능)."""
+    probe = text.strip()[:20]
+    if not probe:
+        return True
+    return probe in capture(remote, pane_id, lines=50)

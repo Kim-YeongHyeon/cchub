@@ -297,7 +297,8 @@ async def test_follow_toggle_flips_state(tmp_path):
 
 
 async def test_submit_sends_prompt_to_selected_session(tmp_path):
-    fake = FakeRemote({"tmux": RunResult(0, "", "")})
+    fake = FakeRemote({("tmux", "list-panes"): RunResult(0, "%5\tmain:0.0\t/home/u/proj\tclaude\t100\n", ""),
+                       "tmux": RunResult(0, "", "")})
     app = make_app_with_remote(tmp_path, fake)
     async with app.run_test() as pilot:
         app.apply_snapshots(snap(state="idle"))
@@ -313,6 +314,22 @@ async def test_submit_sends_prompt_to_selected_session(tmp_path):
         assert inp.value == ""  # 성공 시 입력창 비움
 
 
+async def test_send_to_vanished_pane_notifies_and_skips(tmp_path):
+    # tmux list-panes가 빈 결과 → verify_pane 실패 → send-keys 미실행
+    fake = FakeRemote({("tmux", "list-panes"): RunResult(0, "", "")})
+    app = make_app_with_remote(tmp_path, fake)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap(state="idle"))
+        app.selected = list(app.snapshots["srv1"].sessions)[0]
+        inp = app.query_one("#prompt", Input)
+        inp.focus()
+        inp.value = "보내지면 안 됨"
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not any(c[:2] == ["tmux", "send-keys"] for c in fake.calls)
+
+
 async def test_submit_without_selection_warns_and_does_not_send(tmp_path):
     fake = FakeRemote()
     app = make_app_with_remote(tmp_path, fake)
@@ -326,7 +343,8 @@ async def test_submit_without_selection_warns_and_does_not_send(tmp_path):
 
 
 async def test_working_session_asks_confirmation(tmp_path):
-    fake = FakeRemote({"tmux": RunResult(0, "", "")})
+    fake = FakeRemote({("tmux", "list-panes"): RunResult(0, "%5\tmain:0.0\t/home/u/proj\tclaude\t100\n", ""),
+                       "tmux": RunResult(0, "", "")})
     app = make_app_with_remote(tmp_path, fake)
     async with app.run_test() as pilot:
         app.apply_snapshots(snap(state="working"))
@@ -344,7 +362,8 @@ async def test_working_session_asks_confirmation(tmp_path):
 
 
 async def test_working_session_confirm_y_sends(tmp_path):
-    fake = FakeRemote({"tmux": RunResult(0, "", "")})
+    fake = FakeRemote({("tmux", "list-panes"): RunResult(0, "%5\tmain:0.0\t/home/u/proj\tclaude\t100\n", ""),
+                       "tmux": RunResult(0, "", "")})
     app = make_app_with_remote(tmp_path, fake)
     async with app.run_test() as pilot:
         app.apply_snapshots(snap(state="working"))

@@ -109,7 +109,10 @@ def cmd_send(args) -> int:
     if not tmux.send_prompt(remote, ls.pane_id, args.prompt):
         print("전송 실패 (pane이 사라졌거나 tmux 오류)", file=sys.stderr)
         return 1
-    print(f"{args.server} 세션 {args.number}({ls.project})에 전송됨")
+    if tmux.confirm_delivery(remote, ls.pane_id, args.prompt):
+        print(f"{args.server} 세션 {args.number}({ls.project})에 전송됨")
+    else:
+        print(f"{args.server} 세션 {args.number}({ls.project})에 전송됨 (화면 반영 미확인)")
     return 0
 
 

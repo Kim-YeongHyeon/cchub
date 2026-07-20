@@ -13,6 +13,9 @@ class FakeRemote(Remote):
 
     def run(self, argv: list[str], timeout: int = 15) -> RunResult:
         self.calls.append(list(argv))
+        key2 = (argv[0], argv[1]) if len(argv) > 1 else None
+        if key2 in self.responses:
+            return self.responses[key2]
         return self.responses.get(argv[0], RunResult(0, "", ""))
 
     def mirror(self, remote_dir: str, local_dir: Path, timeout: int = 120) -> RunResult:

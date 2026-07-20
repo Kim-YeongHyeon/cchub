@@ -54,3 +54,18 @@ def test_capture():
     out = tmux.capture(fake, "%0", lines=50)
     assert out == "화면 내용\n"
     assert fake.calls[0] == ["tmux", "capture-pane", "-p", "-t", "%0", "-S", "-50"]
+
+
+def test_verify_pane():
+    fake = FakeRemote({("tmux", "list-panes"): RunResult(0, PANES_OUT, "")})
+    assert tmux.verify_pane(fake, "%0")        # claude pane
+    assert not tmux.verify_pane(fake, "%3")    # bash pane
+    assert not tmux.verify_pane(fake, "%99")   # 없음
+
+
+def test_confirm_delivery():
+    fake = FakeRemote({("tmux", "capture-pane"): RunResult(0, "…화면에 실험 시작해줘 라고 보임\n", "")})
+    assert tmux.confirm_delivery(fake, "%0", "실험 시작해줘")
+    assert tmux.confirm_delivery(fake, "%0", "   ")     # 빈 텍스트는 True
+    fake2 = FakeRemote({("tmux", "capture-pane"): RunResult(0, "다른 내용\n", "")})
+    assert not tmux.confirm_delivery(fake2, "%0", "실험 시작해줘")

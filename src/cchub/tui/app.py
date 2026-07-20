@@ -250,20 +250,30 @@ class CchubApp(App):
     def do_send(self, text: str) -> None:
         ls = self.selected
         if ls is None:
-            self.call_from_thread(self.notify, "선택된 세션이 사라졌습니다", severity="warning")
+            self.call_from_thread(self.notify, "선택된 세션이 사라졌습니다",
+                                  severity="warning")
             return
         try:
             remote = self.remote_factory(self.cfg.servers[ls.server].host)
+            if not tmux.verify_pane(remote, ls.pane_id):
+                self.call_from_thread(
+                    self.notify, "대상 pane이 더 이상 유효하지 않습니다 (y로 새로고침)",
+                    severity="error")
+                return
             ok = tmux.send_prompt(remote, ls.pane_id, text)
+            delivered = ok and tmux.confirm_delivery(remote, ls.pane_id, text)
         except Exception as e:  # noqa: BLE001
             self.call_from_thread(self.notify, f"전송 실패: {e}", severity="error")
             return
-        self.call_from_thread(self._after_send, ok)
+        self.call_from_thread(self._after_send, ok, delivered)
 
-    def _after_send(self, ok: bool) -> None:
+    def _after_send(self, ok: bool, delivered: bool) -> None:
         if ok:
             self.query_one("#prompt", Input).value = ""
-            self.notify("전송됨")
+            if delivered:
+                self.notify("전송됨")
+            else:
+                self.notify("전송됨 (화면 반영 미확인)", severity="warning")
             self.show_detail()
         else:
             self.notify("전송 실패 (pane 소실 또는 tmux 오류)", severity="error")
