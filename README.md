@@ -37,7 +37,7 @@
 ## 설치
 
 ```bash
-git clone https://github.com/<owner>/cchub.git
+git clone https://github.com/Kim-YeongHyeon/cchub.git
 cd cchub
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -261,6 +261,10 @@ ssh ControlMaster 소켓은 AF_UNIX 경로 길이 제한을 피하기 위해 시
 실물 통합 테스트는 `cchub-smoke`라는 ssh alias(자기 자신으로의 SSH)가 있을
 때만 실행되고 없으면 자동 skip됩니다. 이 테스트는 실제 SSH·rsync·tmux 경로로
 sync/list/search/TUI/skill 왕복까지 검증합니다.
+
+## 라이선스
+
+MIT — [LICENSE](LICENSE) 참고.
 
 ## 버전
 
