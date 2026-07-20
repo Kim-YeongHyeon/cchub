@@ -36,6 +36,7 @@ class SearchScreen(ModalScreen[tuple[str, str] | None]):
         self.query_one("#search-input", Input).focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
         query = event.value.strip()
         if not query:
             return
@@ -97,6 +98,10 @@ class HistoryScreen(ModalScreen[tuple[str, str] | None]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._refresh(event.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.query_one("#history-table", DataTable).focus()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         r = self._rows[event.cursor_row]

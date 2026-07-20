@@ -141,3 +141,9 @@ def test_push_remote_to_remote_cleans_relay_dir(env, capsys):
     relay = tmp / "relay"
     assert relay.exists()
     assert list(relay.iterdir()) == []   # 임시 디렉토리가 정리됨
+
+
+def test_push_unknown_server_prefix_is_error(env, capsys):
+    assert cli.main(["push", "srv3:~/x", "srv1:~/y"]) == 1
+    err = capsys.readouterr().err
+    assert "알 수 없는 서버" in err and "srv3" in err

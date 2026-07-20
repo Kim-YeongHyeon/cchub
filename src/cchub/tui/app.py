@@ -285,6 +285,8 @@ class CchubApp(App):
         self._write_detail(f"[{server} / {session_id[:8]}]\n{text}")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "prompt":
+            return
         text = event.value.strip()
         if not text:
             return

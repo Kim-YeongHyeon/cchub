@@ -30,11 +30,17 @@ def _make_remote(host: str) -> Remote:
 
 
 def _parse_loc(cfg: Config, loc: str) -> tuple[str | None, str]:
-    """'srv1:~/path' → ('srv1', '~/path'), 로컬 경로 → (None, 경로)."""
+    """'srv1:~/path' → ('srv1', '~/path'), 로컬 경로 → (None, 경로).
+
+    콜론 접두가 등록된 서버가 아니고 경로 문자(/)도 없으면 오타로 간주해 에러.
+    """
     if ":" in loc:
         name, _, path = loc.partition(":")
         if name in cfg.servers:
             return name, path
+        if "/" not in name:
+            raise ValueError(
+                f"알 수 없는 서버: {name} (설정: {', '.join(cfg.servers)})")
     return None, loc
 
 
@@ -201,8 +207,12 @@ def cmd_push(args) -> int:
     import tempfile
 
     cfg, root, _index = _ctx()
-    src_srv, src_path = _parse_loc(cfg, args.src)
-    dst_srv, dst_path = _parse_loc(cfg, args.dst)
+    try:
+        src_srv, src_path = _parse_loc(cfg, args.src)
+        dst_srv, dst_path = _parse_loc(cfg, args.dst)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
     if src_srv is None and dst_srv is None:
         print("src/dst 중 하나는 <서버>:<경로> 형식이어야 합니다", file=sys.stderr)
         return 1

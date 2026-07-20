@@ -82,3 +82,44 @@ async def test_history_filter_narrows(tmp_path):
         inp.value = "NUMA"
         await pilot.pause()
         assert table.row_count == 1
+
+
+async def test_modal_enter_never_sends_to_session(tmp_path):
+    """검색/이력 모달의 Enter가 do_send로 버블링되지 않는다 (Critical 회귀)."""
+    from cchub.config import ServerConfig
+    from cchub.sessions import LiveSession
+    from cchub.ssh import RunResult
+    from cchub.tui.data import ServerSnapshot
+    from conftest import FakeRemote
+
+    fake = FakeRemote({
+        ("tmux", "list-panes"): RunResult(0, "%5\tmain:0.0\t/home/u/proj\tclaude\t100\n", ""),
+        "tmux": RunResult(0, "", ""),
+    })
+    app = make_indexed_app(tmp_path)
+    app.remote_factory = lambda h: fake
+    ls = LiveSession(server="srv1", number=1, pane_id="%5", location="main:0.0",
+                     cwd="/home/u/proj", project="-home-u-proj",
+                     session_id="s-1", title="", state="idle")
+    async with app.run_test() as pilot:
+        base_screen = app.screen
+        # 서버 등록은 mount 이후에: on_mount의 최초 action_refresh가 백그라운드에서
+        # 실제 collect_sessions를 실행해 우리가 지정한 selected를 덮어쓰는 것을 방지.
+        app.cfg.servers["srv1"] = ServerConfig(name="srv1", host="u@h")
+        app.apply_snapshots({"srv1": ServerSnapshot(server="srv1", sessions=[ls])})
+        app.selected = ls
+        for key in ("slash", "h"):
+            await pilot.press(key)
+            inp = app.screen.query_one(
+                "#search-input" if key == "slash" else "#history-filter")
+            inp.focus()
+            inp.value = "위험한 검색어"
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # ConfirmSend가 검색/이력 모달 위에 뜰 수 있으므로 기본 화면으로
+            # 돌아올 때까지 escape를 반복해 닫는다.
+            while app.screen is not base_screen:
+                await pilot.press("escape")
+                await pilot.pause()
+        assert not any(c[:2] == ["tmux", "send-keys"] for c in fake.calls)
