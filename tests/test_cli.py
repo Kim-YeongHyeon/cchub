@@ -133,3 +133,11 @@ def test_push_remote_to_remote_relays_via_local(env, capsys):
 def test_push_both_local_is_error(env, capsys):
     assert cli.main(["push", "/a", "/b"]) == 1
     assert "서버" in capsys.readouterr().err
+
+
+def test_push_remote_to_remote_cleans_relay_dir(env, capsys):
+    tmp, fake = env
+    assert cli.main(["push", "srv1:~/exp/out.json", "srv2:~/inbox"]) == 0
+    relay = tmp / "relay"
+    assert relay.exists()
+    assert list(relay.iterdir()) == []   # 임시 디렉토리가 정리됨

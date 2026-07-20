@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sqlite3
 import sys
 from pathlib import Path
@@ -209,11 +210,14 @@ def cmd_push(args) -> int:
         relay_root = root / "relay"
         relay_root.mkdir(parents=True, exist_ok=True)
         tmp = Path(tempfile.mkdtemp(dir=relay_root))
-        r = _make_remote(cfg.servers[src_srv].host).fetch(src_path, tmp)
-        if r.rc != 0:
-            print(f"가져오기 실패: {r.err.strip()}", file=sys.stderr)
-            return 1
-        r = _make_remote(cfg.servers[dst_srv].host).push(tmp, dst_path)
+        try:
+            r = _make_remote(cfg.servers[src_srv].host).fetch(src_path, tmp)
+            if r.rc != 0:
+                print(f"가져오기 실패: {r.err.strip()}", file=sys.stderr)
+                return 1
+            r = _make_remote(cfg.servers[dst_srv].host).push(tmp, dst_path)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
     elif src_srv:
         r = _make_remote(cfg.servers[src_srv].host).fetch(
             src_path, Path(dst_path).expanduser())
