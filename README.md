@@ -233,6 +233,9 @@ transcript든 상관없이 화면에 보이는 그대로)이 클립보드로 복
        User <내 계정>
    ```
 
+   **주의**: cchub는 자동화를 위해 `BatchMode=yes`를 사용하므로, 키 기반(비밀번호 없는) SSH 로그인이 먼저 설정돼야 합니다.
+   `ssh-copy-id -i ~/.ssh/id_rsa cchub-local` (또는 `ssh-copy-id -i ~/.ssh/id_rsa localhost`) 를 실행해 공개 키를 등록하세요.
+
 2. `config.toml`에 그 alias를 `host`로 하는 서버를 추가합니다:
 
    ```toml

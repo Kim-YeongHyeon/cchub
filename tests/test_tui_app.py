@@ -414,20 +414,19 @@ async def test_unsplit_cancels_stale_detail_worker(tmp_path):
         assert app.panes[1].text != "STALE"   # 새 패널 오염 없음
 
 
-async def test_unsplit_pauses_follow_timer_if_only_pane1_followed(tmp_path):
+async def test_unsplit_pauses_follow_timer_if_only_pane1_followed(tmp_path, monkeypatch):
     app = make_app(tmp_path)
     async with app.run_test() as pilot:
         await pilot.press("|")
         await pilot.pause()
         await pilot.press("o")
         await pilot.press("f")            # 패널 1만 팔로우
-        # 타이머 상태 확인
-        timer_was_running = True  # 팔로우가 켜졌으므로 타이머는 활성
+        paused = []
+        monkeypatch.setattr(app._follow_timer, "pause", lambda: paused.append(True))
         await pilot.press("|")            # 해제
         await pilot.pause()
+        assert paused                     # 타이머 pause가 실제 호출됨
         assert not any(p.follow_on for p in app.panes)
-        # 해제 후 더 이상 팔로우할 패널이 없으므로 타이머는 일시정지됨
-        # (내부 _active 상태는 textual 버전마다 다르므로 follow_on 상태만 검증)
 
 
 PROC_OUT = """cpu  100 0 100 700 100 0 0 0 0 0
@@ -595,6 +594,20 @@ async def test_x_copies_active_pane_text(tmp_path, monkeypatch):
         app._write_detail("복사할 내용")
         await pilot.press("x")
         assert copied == ["복사할 내용"]
+
+
+async def test_x_copies_pane1_text_when_active(tmp_path, monkeypatch):
+    app = make_app(tmp_path)
+    copied = []
+    async with app.run_test() as pilot:
+        monkeypatch.setattr(app, "copy_to_clipboard", lambda t: copied.append(t))
+        await pilot.press("|")
+        await pilot.pause()
+        app._write_detail_pane(0, "패널0 내용")
+        app._write_detail_pane(1, "패널1 내용")
+        await pilot.press("o")            # 활성 = 1
+        await pilot.press("x")
+        assert copied == ["패널1 내용"]
 
 
 async def test_split_toggle_and_switch(tmp_path):
