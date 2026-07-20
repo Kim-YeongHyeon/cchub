@@ -100,6 +100,8 @@ def cmd_sync(_args) -> int:
         else:
             ok = False
             print(f"{rep.server}: 실패 — {rep.error}", file=sys.stderr)
+    if not ok:
+        print("→ cchub doctor 로 서버별 진단을 실행해 보세요", file=sys.stderr)
     return 0 if ok else 1
 
 

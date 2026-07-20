@@ -285,3 +285,29 @@ def test_cmd_doctor_no_servers(monkeypatch, capsys, tmp_path):
     rc = cli.cmd_doctor(None)
     assert rc == 1
     assert "servers" in capsys.readouterr().out
+
+
+def test_cmd_sync_failure_suggests_doctor(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    from cchub.sync import SyncReport
+    monkeypatch.setattr(cli, "_ctx", lambda: (object(), tmp_path, object()))
+    monkeypatch.setattr(cli, "_sync_all",
+                        lambda cfg, root, index: [SyncReport(server="srv1", ok=False, error="boom")])
+    rc = cli.cmd_sync(None)
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "cchub doctor" in err
+
+
+def test_cmd_sync_success_no_doctor_hint(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    from cchub.sync import SyncReport
+    monkeypatch.setattr(cli, "_ctx", lambda: (object(), tmp_path, object()))
+    monkeypatch.setattr(cli, "_sync_all",
+                        lambda cfg, root, index: [SyncReport(server="srv1", ok=True, files=1, events=2)])
+    rc = cli.cmd_sync(None)
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "cchub doctor" not in err
