@@ -108,7 +108,7 @@ def cmd_sync(_args) -> int:
 def cmd_doctor(_args) -> int:
     cfg = load_config()
     if not cfg.servers:
-        print("config.toml에 [servers.<이름>] 항목을 추가하세요")
+        print("config.toml에 [servers.<이름>] 항목을 추가하세요", file=sys.stderr)
         return 1
     any_fail = False
     for name, s in cfg.servers.items():

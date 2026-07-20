@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from cchub import cli, doctor as doctor_mod
+from cchub import cli
 from cchub.ssh import RunResult
 from conftest import FakeRemote
 
@@ -249,7 +249,6 @@ def test_cmd_doctor_fail_exit_1(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
     from cchub import cli
     from cchub.config import Config, ServerConfig
-    from cchub.ssh import RunResult
     cfg = Config(sync_interval=30, stats_interval=2,
                  servers={"srv1": ServerConfig(name="srv1", host="cigar")})
     monkeypatch.setattr(cli, "load_config", lambda: cfg)
@@ -265,7 +264,6 @@ def test_cmd_doctor_warn_only_exit_0(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
     from cchub import cli
     from cchub.config import Config, ServerConfig
-    from cchub.ssh import RunResult
     cfg = Config(sync_interval=30, stats_interval=2,
                  servers={"srv1": ServerConfig(name="srv1", host="sudal")})
     monkeypatch.setattr(cli, "load_config", lambda: cfg)
@@ -284,7 +282,7 @@ def test_cmd_doctor_no_servers(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(cli, "load_config", lambda: cfg)
     rc = cli.cmd_doctor(None)
     assert rc == 1
-    assert "servers" in capsys.readouterr().out
+    assert "servers" in capsys.readouterr().err
 
 
 def test_cmd_sync_failure_suggests_doctor(monkeypatch, capsys, tmp_path):
