@@ -20,6 +20,7 @@ class ServerConfig:
     host: str
     results: list[str] = field(default_factory=list)
     claude_dir: str = "~/.claude"
+    skill_paths: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -47,6 +48,7 @@ def load_config(path: Path | None = None) -> Config:
             host=s["host"],
             results=list(s.get("results", [])),
             claude_dir=s.get("claude_dir", "~/.claude"),
+            skill_paths=list(s.get("skill_paths", [])),
         )
     return Config(
         sync_interval=int(general.get("sync_interval", 30)),

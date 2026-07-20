@@ -54,3 +54,11 @@ def test_server_without_host_raises(tmp_path):
 def test_cchub_dir_env_override(monkeypatch, tmp_path):
     monkeypatch.setenv("CCHUB_DIR", str(tmp_path / "x"))
     assert cchub_dir() == tmp_path / "x"
+
+
+def test_skill_paths_parsed(tmp_path):
+    p = write(tmp_path, '[servers.a]\nhost = "h"\nskill_paths = ["~/repo1", "/abs/repo2"]\n')
+    cfg = load_config(p)
+    assert cfg.servers["a"].skill_paths == ["~/repo1", "/abs/repo2"]
+    p2 = write(tmp_path, '[servers.b]\nhost = "h"\n')
+    assert load_config(p2).servers["b"].skill_paths == []
