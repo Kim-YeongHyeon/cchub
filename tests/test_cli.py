@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from cchub import cli
+from cchub import cli, doctor as doctor_mod
 from cchub.ssh import RunResult
 from conftest import FakeRemote
 
@@ -229,3 +229,59 @@ def test_skills_delete_yes_skips_prompt(skills_env, capsys):
     tmp, fake, lib = skills_env
     assert cli.main(["skills", "delete", "srv1", "my-skill", "--yes"]) == 0
     assert ["rm", "-rf", ".claude/skills/my-skill"] in fake.calls
+
+
+def test_cmd_doctor_all_ok(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    from cchub.config import Config, ServerConfig
+    cfg = Config(sync_interval=30, stats_interval=2,
+                 servers={"srv1": ServerConfig(name="srv1", host="sudal")})
+    monkeypatch.setattr(cli, "load_config", lambda: cfg)
+    monkeypatch.setattr(cli, "_make_remote", lambda host: FakeRemote())
+    rc = cli.cmd_doctor(None)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[srv1]" in out and "ssh 접속" in out and "✓" in out
+
+
+def test_cmd_doctor_fail_exit_1(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    from cchub.config import Config, ServerConfig
+    from cchub.ssh import RunResult
+    cfg = Config(sync_interval=30, stats_interval=2,
+                 servers={"srv1": ServerConfig(name="srv1", host="cigar")})
+    monkeypatch.setattr(cli, "load_config", lambda: cfg)
+    monkeypatch.setattr(cli, "_make_remote",
+                        lambda host: FakeRemote({"true": RunResult(255, "", "Connection refused")}))
+    rc = cli.cmd_doctor(None)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "✗" in out and "포트" in out
+
+
+def test_cmd_doctor_warn_only_exit_0(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    from cchub.config import Config, ServerConfig
+    from cchub.ssh import RunResult
+    cfg = Config(sync_interval=30, stats_interval=2,
+                 servers={"srv1": ServerConfig(name="srv1", host="sudal")})
+    monkeypatch.setattr(cli, "load_config", lambda: cfg)
+    monkeypatch.setattr(cli, "_make_remote",
+                        lambda host: FakeRemote({("tmux", "list-sessions"): RunResult(1, "", "no server running")}))
+    rc = cli.cmd_doctor(None)
+    assert rc == 0
+    assert "⚠" in capsys.readouterr().out
+
+
+def test_cmd_doctor_no_servers(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    from cchub.config import Config
+    cfg = Config(sync_interval=30, stats_interval=2, servers={})
+    monkeypatch.setattr(cli, "load_config", lambda: cfg)
+    rc = cli.cmd_doctor(None)
+    assert rc == 1
+    assert "servers" in capsys.readouterr().out

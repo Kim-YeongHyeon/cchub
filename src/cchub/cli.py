@@ -8,12 +8,15 @@ from pathlib import Path
 
 from cchub import sessions, skills as skills_mod, tmux
 from cchub.config import Config, ConfigError, cchub_dir, load_config
+from cchub.doctor import diagnose_server
 from cchub.index import SessionIndex
 from cchub.ssh import Remote, SSHRemote
 from cchub.sync import sync_server
 from cchub.tmux import CLAUDE_COMMANDS
 
 _STATE_MARK = {"working": "●", "waiting": "◌", "idle": "▶", "unknown": "?"}
+
+_DOCTOR_MARK = {"ok": "✓", "fail": "✗", "warn": "⚠", "skip": "-"}
 
 _TEMPLATE = """\
 [general]
@@ -98,6 +101,28 @@ def cmd_sync(_args) -> int:
             ok = False
             print(f"{rep.server}: 실패 — {rep.error}", file=sys.stderr)
     return 0 if ok else 1
+
+
+def cmd_doctor(_args) -> int:
+    cfg = load_config()
+    if not cfg.servers:
+        print("config.toml에 [servers.<이름>] 항목을 추가하세요")
+        return 1
+    any_fail = False
+    for name, s in cfg.servers.items():
+        print(f"[{name}] host={s.host}")
+        results = diagnose_server(_make_remote(s.host), name, s.host, s.claude_dir)
+        for r in results:
+            mark = _DOCTOR_MARK.get(r.status, "?")
+            line = f"  {mark} {r.name}"
+            if r.detail:
+                line += f" — {r.detail}"
+            print(line)
+            if r.hint and r.status in ("fail", "warn"):
+                print(f"      → {r.hint}")
+            if r.status == "fail":
+                any_fail = True
+    return 1 if any_fail else 0
 
 
 def cmd_list(_args) -> int:
@@ -383,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("init", help="설정 템플릿 생성")
     sub.add_parser("sync", help="모든 서버 미러링+인덱싱")
     sub.add_parser("list", help="서버별 live 세션 목록")
+    sub.add_parser("doctor", help="서버별 연결 진단 (SSH·rsync·projects·tmux)")
 
     p = sub.add_parser("send", help="세션에 프롬프트 전송")
     p.add_argument("server")
@@ -424,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     handler = {
-        "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "send": cmd_send,
+        "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "doctor": cmd_doctor, "send": cmd_send,
         "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex, "tui": cmd_tui,
         "brief": cmd_brief, "results": cmd_results, "push": cmd_push, "skills": cmd_skills,
     }[args.cmd]
