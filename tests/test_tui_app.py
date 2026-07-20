@@ -10,7 +10,7 @@ from cchub.ssh import RunResult
 from cchub.tui.app import CchubApp
 from cchub.tui.data import ServerSnapshot
 from conftest import FakeRemote
-from textual.widgets import Input, RichLog, Tree
+from textual.widgets import DataTable, Input, RichLog, Tree
 
 requires_smoke_ssh = pytest.mark.skipif(
     subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2",
@@ -460,3 +460,32 @@ async def test_real_localhost_end_to_end(tmp_path):
         await pilot.pause()
         from textual.widgets import Static
         assert "local" in str(app.query_one("#stats", Static).content)
+
+
+@requires_smoke_ssh
+async def test_real_localhost_history_search_brief(tmp_path):
+    from cchub.config import Config, ServerConfig
+    from cchub.ssh import SSHRemote
+    from cchub.tui.screens import HistoryScreen, SearchScreen
+
+    cfg = Config(servers={"local": ServerConfig(name="local", host="cchub-smoke")},
+                 sync_interval=3600, stats_interval=3600)
+    app = CchubApp(cfg=cfg, root=tmp_path, index=SessionIndex(tmp_path / "i.db"),
+                   remote_factory=SSHRemote)
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()   # 실제 sync + discover
+        await pilot.pause()
+        await pilot.press("h")                   # 이력: 실제 세션들이 보임
+        assert isinstance(app.screen, HistoryScreen)
+        table = app.screen.query_one("#history-table", DataTable)
+        assert table.row_count > 0
+        await pilot.press("escape")
+        await pilot.press("slash")               # 검색: 실제 이력에서 매칭
+        inp = app.screen.query_one("#search-input", Input)
+        inp.value = "envector"
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.press("A")                   # 브리핑 생성 (로컬 파일만)
+        await pilot.pause()
+        assert list((tmp_path / "results").glob("briefing-*.md"))
