@@ -69,3 +69,58 @@ def test_scan_skills_description_with_tabs_survives():
     assert len(result) == 1
     assert result[0].name == "tabby"
     assert result[0].description == "탭이\t들어간\t설명"
+
+
+def make_lib(tmp_path):
+    lib = tmp_path / "skills"
+    (lib / "my-skill").mkdir(parents=True)
+    import shutil
+    shutil.copy(FIXTURE_SKILL / "SKILL.md", lib / "my-skill" / "SKILL.md")
+    return lib
+
+
+def test_pull_skill_fetches_into_lib(tmp_path):
+    fake = FakeRemote()
+    info = skills.SkillInfo(server="srv1", name="e2e-run", scope="project",
+                            path="/home/u/proj/.claude/skills/e2e-run", description="")
+    r = skills.pull_skill(fake, info, tmp_path / "skills")
+    assert r.rc == 0
+    assert fake.fetches == [("/home/u/proj/.claude/skills/e2e-run", tmp_path / "skills")]
+
+
+def test_pull_skill_rejects_bad_name(tmp_path):
+    fake = FakeRemote()
+    info = skills.SkillInfo(server="s", name="../evil", scope="personal",
+                            path="/x/../evil", description="")
+    r = skills.pull_skill(fake, info, tmp_path)
+    assert r.rc != 0 and fake.fetches == []
+
+
+def test_deploy_skill_mkdirs_then_pushes(tmp_path):
+    fake = FakeRemote()
+    lib = make_lib(tmp_path)
+    r = skills.deploy_skill(fake, lib, "my-skill")
+    assert r.rc == 0
+    assert fake.calls[0] == ["mkdir", "-p", ".claude/skills/my-skill"]
+    assert fake.pushes == [(lib / "my-skill", "~/.claude/skills/my-skill")]
+
+
+def test_deploy_skill_requires_local_skill(tmp_path):
+    fake = FakeRemote()
+    r = skills.deploy_skill(fake, tmp_path, "없는스킬")   # 이름 검증도 실패
+    assert r.rc != 0 and fake.pushes == []
+    r2 = skills.deploy_skill(fake, tmp_path, "ghost")     # 이름은 유효, 디렉토리 없음
+    assert r2.rc != 0 and fake.pushes == []
+
+
+def test_delete_skill_uses_fixed_prefix(tmp_path):
+    fake = FakeRemote()
+    r = skills.delete_skill(fake, "my-skill")
+    assert r.rc == 0
+    assert fake.calls[0] == ["rm", "-rf", ".claude/skills/my-skill"]
+
+
+def test_delete_skill_rejects_bad_name():
+    fake = FakeRemote()
+    r = skills.delete_skill(fake, "../../etc")
+    assert r.rc != 0 and fake.calls == []

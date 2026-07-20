@@ -5,7 +5,7 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
-from cchub.ssh import Remote
+from cchub.ssh import Remote, RunResult
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 PERSONAL_SKILLS = ".claude/skills"  # 원격 홈 기준 상대 경로 (쓰기 연산의 고정 프리픽스)
@@ -107,3 +107,30 @@ def local_skills(lib_dir: Path) -> list[SkillInfo]:
                 path=str(d), description=_read_description(md),
             ))
     return out
+
+
+def pull_skill(remote: Remote, info: SkillInfo, lib_dir: Path) -> RunResult:
+    """원격 스킬 디렉토리를 로컬 라이브러리로 가져온다 (lib_dir/<name>/ 생성)."""
+    if not valid_skill_name(info.name):
+        return RunResult(1, "", f"잘못된 스킬 이름: {info.name}")
+    return remote.fetch(info.path, lib_dir)
+
+
+def deploy_skill(remote: Remote, lib_dir: Path, name: str) -> RunResult:
+    """로컬 라이브러리 스킬을 원격 개인 스킬로 배포 (개인 스킬 경로 고정)."""
+    if not valid_skill_name(name):
+        return RunResult(1, "", f"잘못된 스킬 이름: {name}")
+    src = lib_dir / name
+    if not (src / "SKILL.md").is_file():
+        return RunResult(1, "", f"로컬 라이브러리에 없음: {src}")
+    r = remote.run(["mkdir", "-p", f"{PERSONAL_SKILLS}/{name}"])
+    if r.rc != 0:
+        return r
+    return remote.push(src, f"~/{PERSONAL_SKILLS}/{name}")
+
+
+def delete_skill(remote: Remote, name: str) -> RunResult:
+    """원격 개인 스킬 삭제. 경로 프리픽스 고정 + 이름 검증으로 탈출 불가."""
+    if not valid_skill_name(name):
+        return RunResult(1, "", f"잘못된 스킬 이름: {name}")
+    return remote.run(["rm", "-rf", f"{PERSONAL_SKILLS}/{name}"])
