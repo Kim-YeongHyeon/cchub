@@ -60,3 +60,12 @@ def test_local_skills(tmp_path):
     assert (s.server, s.name, s.scope) == ("local", "sample-skill", "local")
     assert "샘플 스킬" in s.description
     assert skills.local_skills(tmp_path / "없음") == []
+
+
+def test_scan_skills_description_with_tabs_survives():
+    out = "project\t/home/u/p/.claude/skills/tabby/SKILL.md\t탭이\t들어간\t설명\n"
+    fake = FakeRemote({"sh": RunResult(0, out, "")})
+    result = skills.scan_skills(fake, "srv1", [], [])
+    assert len(result) == 1
+    assert result[0].name == "tabby"
+    assert result[0].description == "탭이\t들어간\t설명"

@@ -68,7 +68,7 @@ def scan_skills(
         return []
     out: list[SkillInfo] = []
     for line in r.out.splitlines():
-        parts = line.split("\t")
+        parts = line.split("\t", 2)
         if len(parts) != 3 or not parts[1].endswith("/SKILL.md"):
             continue
         scope, md_path, desc = parts
