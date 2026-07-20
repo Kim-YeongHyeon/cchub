@@ -517,3 +517,65 @@ async def test_x_copies_active_pane_text(tmp_path, monkeypatch):
         app._write_detail("복사할 내용")
         await pilot.press("x")
         assert copied == ["복사할 내용"]
+
+
+async def test_split_toggle_and_switch(tmp_path):
+    from textual.css.query import NoMatches
+
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        assert len(app.panes) == 1
+        await pilot.press("|")            # 분할
+        await pilot.pause()
+        assert len(app.panes) == 2
+        assert app.query_one("#detail-1", RichLog)
+        assert app.active == 0
+        assert app.query_one("#detail", RichLog).has_class("active-pane")
+        await pilot.press("o")            # 전환
+        assert app.active == 1
+        assert app.query_one("#detail-1", RichLog).has_class("active-pane")
+        assert not app.query_one("#detail", RichLog).has_class("active-pane")
+        await pilot.press("|")            # 해제
+        await pilot.pause()
+        assert len(app.panes) == 1 and app.active == 0
+        with pytest.raises(NoMatches):
+            app.query_one("#detail-1", RichLog)
+
+
+async def test_split_selection_goes_to_active_pane(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        app.apply_snapshots(snap())
+        await pilot.press("|")
+        await pilot.pause()
+        await pilot.press("o")            # 활성 = 패널 1
+        tree = app.query_one("#tree", Tree)
+        leaf = tree.root.children[0].children[0]
+        tree.select_node(leaf)
+        await pilot.pause()
+        assert app.panes[1].session is not None   # 활성 패널에 할당
+        assert app.panes[0].session is None
+
+
+async def test_split_independent_transcript_mode(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("|")
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.press("t")            # 패널 1만 transcript
+        assert app.panes[1].transcript_mode is True
+        assert app.panes[0].transcript_mode is False
+
+
+async def test_unsplit_while_pane1_active_resets(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("|")
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.press("|")            # 활성이 1인 채로 해제
+        await pilot.pause()
+        assert app.active == 0 and len(app.panes) == 1
+        await pilot.press("o")            # 단일 상태에서 o는 no-op
+        assert app.active == 0

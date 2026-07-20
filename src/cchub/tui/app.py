@@ -64,7 +64,9 @@ class CchubApp(App):
     #stats.hidden { display: none; }
     #body { height: 1fr; }
     #tree { width: 36; border-right: solid $primary; }
-    #detail { height: 1fr; }
+    #detail-row { height: 1fr; }
+    #detail-row RichLog { width: 1fr; height: 1fr; }
+    #detail-row RichLog.active-pane { border: solid $accent; }
     """
     BINDINGS = [
         Binding("q", "quit", "종료"),
@@ -78,6 +80,8 @@ class CchubApp(App):
         Binding("r", "collect_results", "결과수집"),
         Binding("A", "brief", "브리핑"),
         Binding("x", "copy_detail", "복사"),
+        Binding("vertical_line", "toggle_split", "분할"),
+        Binding("o", "switch_pane", "패널전환"),
     ]
 
     _STATE_MARK = {"working": "●", "waiting": "◌", "idle": "▶", "unknown": "?"}
@@ -135,7 +139,8 @@ class CchubApp(App):
         with Horizontal(id="body"):
             yield Tree("서버", id="tree")
             with Vertical():
-                yield RichLog(id="detail", wrap=True, markup=False, highlight=False)
+                with Horizontal(id="detail-row"):
+                    yield RichLog(id="detail", wrap=True, markup=False, highlight=False)
                 yield Input(placeholder="프롬프트 입력 후 Enter (세션 선택 필요)", id="prompt")
         yield Footer()
 
@@ -363,6 +368,32 @@ class CchubApp(App):
             return
         self.copy_to_clipboard(text)
         self.notify(f"클립보드로 복사됨 ({len(text)}자)")
+
+    def action_toggle_split(self) -> None:
+        row = self.query_one("#detail-row", Horizontal)
+        if len(self.panes) == 1:
+            self.panes.append(PaneState())
+            row.mount(RichLog(id="detail-1", wrap=True, markup=False, highlight=False))
+            self.call_after_refresh(self._update_active_classes)
+        else:
+            self.query_one("#detail-1", RichLog).remove()
+            self.panes.pop()
+            self.active = 0
+            self._update_active_classes()
+
+    def action_switch_pane(self) -> None:
+        if len(self.panes) < 2:
+            return
+        self.active = 1 - self.active
+        self._update_active_classes()
+
+    def _update_active_classes(self) -> None:
+        split = len(self.panes) > 1
+        for i in range(len(self.panes)):
+            try:
+                self._detail_log(i).set_class(split and i == self.active, "active-pane")
+            except Exception:  # noqa: BLE001 - mount 직후 타이밍
+                pass
 
     def open_transcript(self, server: str, session_id: str) -> None:
         # 로컬 sqlite 조회는 ms 단위 — 워커 불필요
