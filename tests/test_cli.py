@@ -15,7 +15,7 @@ PANES = "%5\tmain:0.0\t/home/u/proj\tclaude\t100\n"
 def env(tmp_path, monkeypatch):
     """CCHUB_DIR 격리 + config + 미러된 캐시 + FakeRemote 주입."""
     monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
-    (tmp_path / "config.toml").write_text('[servers.srv1]\nhost = "u@h"\nresults = ["~/exp/*"]\n')
+    (tmp_path / "config.toml").write_text('[servers.srv1]\nhost = "u@h"\nresults = ["~/exp/*"]\n[servers.srv2]\nhost = "u@h2"\n')
     proj = tmp_path / "cache" / "srv1" / "projects" / "-home-u-proj"
     proj.mkdir(parents=True)
     shutil.copy(FIXTURE, proj / "s-1.jsonl")
@@ -103,3 +103,33 @@ def test_brief_command(env, capsys):
     assert cli.main(["brief"]) == 0
     out = capsys.readouterr().out
     assert "briefing-" in out and "붙여넣" in out
+
+
+def test_push_local_to_remote(env, capsys):
+    tmp, fake = env
+    f = tmp / "data.json"
+    f.write_text("{}")
+    assert cli.main(["push", str(f), "srv1:~/inbox"]) == 0
+    assert fake.pushes and fake.pushes[0][1] == "~/inbox"
+
+
+def test_push_remote_to_local(env, capsys, tmp_path):
+    tmp, fake = env
+    dest = tmp_path / "here"
+    assert cli.main(["push", "srv1:~/exp/out.json", str(dest)]) == 0
+    assert fake.fetches and fake.fetches[0][0] == "~/exp/out.json"
+
+
+def test_push_remote_to_remote_relays_via_local(env, capsys):
+    tmp, fake = env
+    # env fixture에 두 번째 서버 srv2 추가됨 (config.toml에 [servers.srv2] host="u@h2")
+    assert cli.main(["push", "srv1:~/exp/out.json", "srv2:~/inbox"]) == 0
+    assert fake.fetches[0][0] == "~/exp/out.json"
+    assert fake.pushes[0][1] == "~/inbox"
+    # relay 경유 경로가 CCHUB_DIR/relay 아래
+    assert str(tmp / "relay") in str(fake.fetches[0][1])
+
+
+def test_push_both_local_is_error(env, capsys):
+    assert cli.main(["push", "/a", "/b"]) == 1
+    assert "서버" in capsys.readouterr().err

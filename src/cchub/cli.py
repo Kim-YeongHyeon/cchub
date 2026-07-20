@@ -28,6 +28,15 @@ def _make_remote(host: str) -> Remote:
     return SSHRemote(host)
 
 
+def _parse_loc(cfg: Config, loc: str) -> tuple[str | None, str]:
+    """'srv1:~/path' → ('srv1', '~/path'), 로컬 경로 → (None, 경로)."""
+    if ":" in loc:
+        name, _, path = loc.partition(":")
+        if name in cfg.servers:
+            return name, path
+    return None, loc
+
+
 def _ctx() -> tuple[Config, Path, SessionIndex]:
     cfg = load_config()
     root = cchub_dir()
@@ -187,6 +196,37 @@ def cmd_brief(_args) -> int:
     return 0
 
 
+def cmd_push(args) -> int:
+    import tempfile
+
+    cfg, root, _index = _ctx()
+    src_srv, src_path = _parse_loc(cfg, args.src)
+    dst_srv, dst_path = _parse_loc(cfg, args.dst)
+    if src_srv is None and dst_srv is None:
+        print("src/dst 중 하나는 <서버>:<경로> 형식이어야 합니다", file=sys.stderr)
+        return 1
+    if src_srv and dst_srv:
+        relay_root = root / "relay"
+        relay_root.mkdir(parents=True, exist_ok=True)
+        tmp = Path(tempfile.mkdtemp(dir=relay_root))
+        r = _make_remote(cfg.servers[src_srv].host).fetch(src_path, tmp)
+        if r.rc != 0:
+            print(f"가져오기 실패: {r.err.strip()}", file=sys.stderr)
+            return 1
+        r = _make_remote(cfg.servers[dst_srv].host).push(tmp, dst_path)
+    elif src_srv:
+        r = _make_remote(cfg.servers[src_srv].host).fetch(
+            src_path, Path(dst_path).expanduser())
+    else:
+        r = _make_remote(cfg.servers[dst_srv].host).push(
+            Path(src_path).expanduser(), dst_path)
+    if r.rc != 0:
+        print(f"전송 실패: {r.err.strip()}", file=sys.stderr)
+        return 1
+    print("완료")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="cchub", description="멀티 서버 Claude Code 세션 허브")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -216,11 +256,15 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("results", help="실험 결과 수집 (config의 results 패턴)")
     p.add_argument("server", nargs="?", help="생략 시 전체 서버")
 
+    p = sub.add_parser("push", help="파일 중계 (<서버>:<경로> 또는 로컬 경로)")
+    p.add_argument("src")
+    p.add_argument("dst")
+
     args = ap.parse_args(argv)
     handler = {
         "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "send": cmd_send,
         "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex, "tui": cmd_tui,
-        "brief": cmd_brief, "results": cmd_results,
+        "brief": cmd_brief, "results": cmd_results, "push": cmd_push,
     }[args.cmd]
     try:
         return handler(args)
