@@ -146,3 +146,25 @@ async def test_s_opens_skills_screen_with_rows(tmp_path):
         assert table.row_count >= 1
         await pilot.press("escape")
         assert not isinstance(app.screen, SkillsScreen)
+
+
+async def test_skills_screen_no_duplicate_columns_when_rows_arrive_early(tmp_path):
+    """워커가 mount 전에 완료돼도(서버 0대) 컬럼 중복/loading 고착이 없다."""
+    from cchub.skills import SkillInfo
+
+    app = make_indexed_app(tmp_path)   # cfg.servers 비어 있음 → 워커 즉시 완료
+    async with app.run_test() as pilot:
+        # 직결적으로 mount 전에 show_rows 호출하기
+        screen = SkillsScreen()
+        screen.show_rows([
+            SkillInfo(server="srv0", scope="project", name="test-skill",
+                     path="/tmp/test", description="Test skill"),
+        ])
+        app.push_screen(screen)
+        await pilot.pause()
+
+        assert isinstance(app.screen, SkillsScreen)
+        table = app.screen.query_one("#skills-table", DataTable)
+        assert len(table.columns) == 4      # 중복 없음 (정확히 4개)
+        assert table.loading is False       # 고착 없음
+        assert table.row_count == 1         # 데이터가 채워져 있음

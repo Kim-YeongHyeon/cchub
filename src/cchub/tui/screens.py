@@ -122,6 +122,10 @@ class SkillsScreen(ModalScreen[None]):
     """
     BINDINGS = [Binding("escape", "close", "닫기")]
 
+    def __init__(self):
+        super().__init__()
+        self._rows: list[SkillInfo] | None = None   # mount 전에 도착한 결과 버퍼
+
     def compose(self) -> ComposeResult:
         with Vertical(id="skills-box"):
             yield DataTable(id="skills-table")
@@ -130,15 +134,20 @@ class SkillsScreen(ModalScreen[None]):
         table = self.query_one("#skills-table", DataTable)
         table.add_columns("서버", "scope", "이름", "설명")
         table.cursor_type = "row"
-        table.loading = True
+        if self._rows is not None:
+            self._fill(table)
+        else:
+            table.loading = True
 
     def show_rows(self, rows: list[SkillInfo]) -> None:
-        table = self.query_one("#skills-table", DataTable)
-        if not table.columns:
-            table.add_columns("서버", "scope", "이름", "설명")
+        self._rows = rows
+        if self.is_mounted:
+            self._fill(self.query_one("#skills-table", DataTable))
+
+    def _fill(self, table: DataTable) -> None:
         table.loading = False
         table.clear()
-        for i in rows:
+        for i in self._rows or []:
             table.add_row(i.server, i.scope, i.name, i.description[:80])
 
     def action_close(self) -> None:
