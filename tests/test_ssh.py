@@ -1,4 +1,5 @@
 import subprocess
+import tempfile
 from pathlib import Path
 
 from cchub.ssh import RunResult, SSHRemote
@@ -71,6 +72,21 @@ def test_control_path_stays_under_unix_socket_limit_for_long_cchub_dir(monkeypat
     remote = SSHRemote("user@some-very-descriptive-hostname.example.internal")
     control_path = _control_path(remote)
     assert len(control_path.encode()) < 100
+
+
+def test_control_path_fits_macos_budget(monkeypatch, tmp_path):
+    # macOS 실측(sync 실패 재현): sun_path 한도는 104바이트(Linux 108),
+    # TMPDIR은 /var/folders/XX/<30자>/T 로 48바이트, 그리고 ssh unix_listener는
+    # 소켓 생성 시 ".{랜덤16자}" 임시 이름(+17바이트)을 먼저 쓴다.
+    # → cchub가 통제하는 부분(/{디렉터리명}/{소켓명})의 예산:
+    #   104 - 1(NUL) - 17(ssh 임시 서픽스) - 48(macOS TMPDIR) = 38바이트
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    remote = SSHRemote("user@some-very-descriptive-hostname.example.internal")
+    control_path = _control_path(remote)
+    tmpdir = tempfile.gettempdir()
+    assert control_path.startswith(tmpdir + "/")
+    ours = len(control_path.encode()) - len(tmpdir.encode())
+    assert ours <= 38, f"tempdir 이후 {ours}바이트 — macOS에서 ControlPath too long"
 
 
 def test_fetch_builds_rsync(monkeypatch, tmp_path):
