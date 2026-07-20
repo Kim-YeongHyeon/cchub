@@ -183,6 +183,9 @@ cchub skills delete srv1 old-skill         # 개인 skill 삭제 (이름 재입�
 | 입력창 `Enter` | 선택 세션에 프롬프트 전송 (작업중이면 y/n 확인 모달) |
 | `t` | 상세 패널: live tmux 화면 ↔ 저장된 transcript 전환 |
 | `f` | 팔로우 모드 — 2초마다 화면 자동 새로고침 토글 |
+| `\|` | 상세 패널 2분할 토글 — 두 세션을 나란히 볼 수 있음 |
+| `o` | 분할 상태에서 활성 패널 전환 — 활성 패널은 테두리로 강조되고, 세션 선택/전송/`f`/`t`/`x`는 항상 활성 패널을 대상으로 동작 |
+| `x` | 활성 패널 내용을 클립보드로 복사 (OSC 52) — live 화면이든 transcript든 현재 표시된 그대로 복사됨, 파일 저장 없음 |
 | `c` | CPU/메모리 바 토글 (끄면 폴링도 중단) |
 | `/` | 전 서버 FTS 검색 → 행 선택 시 해당 세션 transcript 표시 |
 | `h` | 전 서버 이력 타임라인 → 입력창으로 즉시 필터링 |
@@ -207,6 +210,39 @@ cchub의 CLI는 로컬 Claude Code 세션의 손발이 되도록 설계됐습니
 Claude가 `cchub send srv1 3 "..."`, `cchub push ...`, `cchub skills deploy ...`를
 알아서 호출합니다. 결과 종합도 마찬가지로 `cchub brief`가 출력한 프롬프트를
 로컬 Claude에 붙여넣는 것으로 이어집니다.
+
+### 원격 세션 내용을 로컬 Claude에 복사하기
+
+TUI 상세 패널에서 `x`를 누르면 현재 표시된 내용(live tmux 화면이든 저장된
+transcript든 상관없이 화면에 보이는 그대로)이 클립보드로 복사됩니다(OSC 52 —
+로컬 터미널이 지원하면 SSH로 들어간 원격 TUI에서 눌러도 로컬 클립보드로
+전달됩니다). 그대로 로컬 Claude Code 세션에 붙여넣으면, 원격 세션의 결과나
+에러 로그를 파일 경유 없이 바로 분석에 활용할 수 있습니다.
+
+### 로컬 머신도 서버로 등록하기
+
+로컬 tmux에서 돌아가는 claude 세션도 다른 원격 서버와 똑같이 TUI 트리에
+띄우고 싶다면, 로컬 머신을 가리키는 ssh alias를 하나 만들고 그걸 서버로
+등록하면 됩니다.
+
+1. `~/.ssh/config`에 자기 자신으로 연결되는 alias를 추가합니다:
+
+   ```
+   Host cchub-local
+       HostName localhost
+       User <내 계정>
+   ```
+
+2. `config.toml`에 그 alias를 `host`로 하는 서버를 추가합니다:
+
+   ```toml
+   [servers.local]
+   host = "cchub-local"
+   ```
+
+3. `cchub tui`를 다시 실행하면 `local` 노드 아래에 로컬 tmux에 떠 있는 claude
+   세션들도 다른 서버와 동일하게 나타나서 선택·전송·transcript 조회가
+   가능합니다.
 
 ## 동작 원리
 
@@ -268,6 +304,7 @@ MIT — [LICENSE](LICENSE) 참고.
 
 ## 버전
 
+- **0.5.0** — 상세 패널 2분할(`\|`)·활성 패널 전환(`o`)·클립보드 복사(`x`, OSC 52), 로컬 머신 서버 등록 가이드
 - **0.4.0** — skill 통합 관리 (`cchub skills`, TUI `s`)
 - **0.3.0** — 통합 이력(`h`)·검색(`/`), 결과 수집(`r`)·브리핑(`A`), 파일 중계(`push`), same-cwd 세션 페어링, 전송 전/후 검증
 - **0.2.0** — TUI (트리·live 뷰·프롬프트 전송·CPU 바)

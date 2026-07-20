@@ -540,6 +540,35 @@ async def test_real_localhost_history_search_brief(tmp_path):
         assert list((tmp_path / "results").glob("briefing-*.md"))
 
 
+@requires_smoke_ssh
+async def test_real_split_view_two_sessions(tmp_path):
+    """실제 SSH로 분할 뷰에 세션을 각각 할당하고 두 패널이 채워지는지 확인 (읽기 전용)."""
+    from cchub.config import Config, ServerConfig
+    from cchub.ssh import SSHRemote
+
+    cfg = Config(servers={"local": ServerConfig(name="local", host="cchub-smoke")},
+                 sync_interval=3600, stats_interval=3600)
+    app = CchubApp(cfg=cfg, root=tmp_path, index=SessionIndex(tmp_path / "i.db"),
+                   remote_factory=SSHRemote)
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        tree = app.query_one("#tree", Tree)
+        leaves = [l for n in tree.root.children for l in n.children]
+        if not leaves:
+            pytest.skip("실행 중인 claude 세션 없음")
+        await pilot.press("|")
+        await pilot.pause()
+        tree.select_node(leaves[0])                  # 패널 0
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        await pilot.press("o")
+        tree.select_node(leaves[-1])                 # 패널 1 (세션 1개면 같은 세션)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.panes[0].text and app.panes[1].text   # 두 패널 모두 내용 표시
+
+
 async def test_pane_state_backs_legacy_attrs(tmp_path):
     """selected/transcript_mode/follow_on이 PaneState[active]를 통해 동작한다."""
     app = make_app(tmp_path)
