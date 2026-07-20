@@ -168,3 +168,18 @@ async def test_skills_screen_no_duplicate_columns_when_rows_arrive_early(tmp_pat
         assert len(table.columns) == 4      # 중복 없음 (정확히 4개)
         assert table.loading is False       # 고착 없음
         assert table.row_count == 1         # 데이터가 채워져 있음
+
+
+async def test_s_on_skills_screen_does_not_stack(tmp_path):
+    app = make_indexed_app(tmp_path)
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        first = app.screen
+        assert isinstance(first, SkillsScreen)
+        await pilot.press("s")           # 중첩되면 안 됨
+        await pilot.pause()
+        assert app.screen is first
+        table = app.screen.query_one("#skills-table", DataTable)
+        assert table.loading is False    # 고착 없음

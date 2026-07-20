@@ -15,6 +15,11 @@ def valid_skill_name(name: str) -> bool:
     return bool(_NAME_RE.match(name))
 
 
+def default_lib_dir() -> Path:
+    """로컬 skill 라이브러리 위치 (Claude Code가 읽는 개인 스킬 디렉토리)."""
+    return Path.home() / ".claude" / "skills"
+
+
 @dataclass
 class SkillInfo:
     server: str

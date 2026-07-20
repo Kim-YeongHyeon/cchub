@@ -161,7 +161,6 @@ def skills_env(env, tmp_path, monkeypatch):
     fake.responses["sh"] = RunResult(0, SKILL_SCAN_OUT, "")
     lib = tmp_path / "lib"
     monkeypatch.setattr(cli, "_local_lib", lambda: lib)
-    from pathlib import Path as P
     (lib / "my-skill").mkdir(parents=True)
     (lib / "my-skill" / "SKILL.md").write_text(
         "---\nname: my-skill\ndescription: 로컬 스킬\n---\n")
@@ -195,6 +194,13 @@ def test_skills_deploy(skills_env, capsys):
     assert cli.main(["skills", "deploy", "my-skill", "srv1", "srv2"]) == 0
     assert len(fake.pushes) == 2
     assert fake.pushes[0] == (lib / "my-skill", "~/.claude/skills/my-skill")
+
+
+def test_skills_deploy_unknown_server_blocks_all(skills_env, capsys):
+    tmp, fake, lib = skills_env
+    assert cli.main(["skills", "deploy", "my-skill", "srv1", "srv-오타"]) == 1
+    assert fake.pushes == []             # 부분 배포 없음
+    assert "srv-오타" in capsys.readouterr().err
 
 
 def test_skills_copy_relays_and_cleans(skills_env, capsys):

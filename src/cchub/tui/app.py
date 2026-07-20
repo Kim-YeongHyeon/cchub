@@ -11,7 +11,7 @@ from textual.widgets import Footer, Input, RichLog, Static, Tree
 from textual.worker import get_current_worker
 
 from cchub import stats as stats_mod, tmux
-from cchub.skills import local_skills, scan_skills
+from cchub.skills import default_lib_dir, local_skills, scan_skills
 from cchub.tmux import CLAUDE_COMMANDS
 from cchub.briefing import generate_briefing
 from cchub.config import Config, cchub_dir, load_config
@@ -251,6 +251,8 @@ class CchubApp(App):
         self.push_screen(HistoryScreen(self.index), _open)
 
     def action_skills(self) -> None:
+        if isinstance(self.screen, SkillsScreen):
+            return
         screen = SkillsScreen()
         self.push_screen(screen)
         self.load_skills(screen)
@@ -258,7 +260,7 @@ class CchubApp(App):
     @work(thread=True, exclusive=True, group="skills", exit_on_error=False)
     def load_skills(self, screen: SkillsScreen) -> None:
         worker = get_current_worker()
-        rows = local_skills(Path.home() / ".claude" / "skills")
+        rows = local_skills(default_lib_dir())
         for name, s in self.cfg.servers.items():
             if worker.is_cancelled:
                 return

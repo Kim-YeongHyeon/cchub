@@ -243,7 +243,7 @@ def cmd_push(args) -> int:
 
 
 def _local_lib() -> Path:
-    return Path.home() / ".claude" / "skills"
+    return skills_mod.default_lib_dir()
 
 
 def _scan_server(cfg: Config, name: str) -> list:
@@ -310,11 +310,13 @@ def cmd_skills(args) -> int:
         return 0
 
     if args.skills_cmd == "deploy":
+        unknown = [n for n in args.servers if n not in cfg.servers]
+        if unknown:
+            print(f"알 수 없는 서버: {', '.join(unknown)} (설정: {', '.join(cfg.servers)})",
+                  file=sys.stderr)
+            return 1
         ok = True
         for name in args.servers:
-            if name not in cfg.servers:
-                print(f"알 수 없는 서버: {name}", file=sys.stderr)
-                return 1
             r = skills_mod.deploy_skill(_make_remote(cfg.servers[name].host), _local_lib(), args.name)
             if r.rc == 0:
                 print(f"{name}: 배포됨 (~/.claude/skills/{args.name})")
@@ -330,6 +332,11 @@ def cmd_skills(args) -> int:
             return 1
         relay_root = root / "relay"
         relay_root.mkdir(parents=True, exist_ok=True)
+        unknown = [n for n in args.dst_servers if n not in cfg.servers]
+        if unknown:
+            print(f"알 수 없는 서버: {', '.join(unknown)} (설정: {', '.join(cfg.servers)})",
+                  file=sys.stderr)
+            return 1
         tmp = Path(tempfile.mkdtemp(dir=relay_root))
         try:
             r = skills_mod.pull_skill(_make_remote(cfg.servers[args.src_server].host), info, tmp)
@@ -338,9 +345,6 @@ def cmd_skills(args) -> int:
                 return 1
             ok = True
             for name in args.dst_servers:
-                if name not in cfg.servers:
-                    print(f"알 수 없는 서버: {name}", file=sys.stderr)
-                    return 1
                 r = skills_mod.deploy_skill(_make_remote(cfg.servers[name].host), tmp, info.name)
                 if r.rc == 0:
                     print(f"{name}: 복사됨")
@@ -360,7 +364,7 @@ def cmd_skills(args) -> int:
             return 1
         if not args.yes:
             print(f"{args.server}의 개인 스킬 ~/.claude/skills/{args.name} 을(를) 삭제합니다.")
-            if input(f"확인을 위해 스킬 이름을 다시 입력하세요: ").strip() != args.name:
+            if input("확인을 위해 스킬 이름을 다시 입력하세요: ").strip() != args.name:
                 print("취소됨", file=sys.stderr)
                 return 1
         r = skills_mod.delete_skill(_make_remote(cfg.servers[args.server].host), args.name)
