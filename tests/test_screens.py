@@ -6,7 +6,7 @@ from textual.widgets import DataTable, Input, RichLog
 from cchub.config import Config
 from cchub.index import SessionIndex
 from cchub.tui.app import CchubApp
-from cchub.tui.screens import SearchScreen, HistoryScreen
+from cchub.tui.screens import SearchScreen, HistoryScreen, SkillsScreen
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_transcript.jsonl"
 
@@ -123,3 +123,26 @@ async def test_modal_enter_never_sends_to_session(tmp_path):
                 await pilot.press("escape")
                 await pilot.pause()
         assert not any(c[:2] == ["tmux", "send-keys"] for c in fake.calls)
+
+
+async def test_s_opens_skills_screen_with_rows(tmp_path):
+    from cchub.config import ServerConfig
+    from cchub.ssh import RunResult
+    from conftest import FakeRemote
+
+    fake = FakeRemote({
+        ("tmux", "list-panes"): RunResult(0, "%5\tm:0.0\t/home/u/proj\tclaude\t100\n", ""),
+        "sh": RunResult(0, "project\t/home/u/proj/.claude/skills/e2e-run/SKILL.md\tE2E\n", ""),
+    })
+    app = make_indexed_app(tmp_path)
+    app.remote_factory = lambda h: fake
+    app.cfg.servers["srv1"] = ServerConfig(name="srv1", host="u@h")
+    async with app.run_test() as pilot:
+        await pilot.press("s")
+        assert isinstance(app.screen, SkillsScreen)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        table = app.screen.query_one("#skills-table", DataTable)
+        assert table.row_count >= 1
+        await pilot.press("escape")
+        assert not isinstance(app.screen, SkillsScreen)

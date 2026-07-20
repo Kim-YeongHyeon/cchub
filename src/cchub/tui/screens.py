@@ -7,6 +7,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input
 
 from cchub.index import SessionIndex, SessionRow
+from cchub.skills import SkillInfo
 
 
 class SearchScreen(ModalScreen[tuple[str, str] | None]):
@@ -106,6 +107,39 @@ class HistoryScreen(ModalScreen[tuple[str, str] | None]):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         r = self._rows[event.cursor_row]
         self.dismiss((r.server, r.session_id))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class SkillsScreen(ModalScreen[None]):
+    """전 서버 skill 조회 (읽기 전용). 배포/삭제는 CLI로."""
+
+    CSS = """
+    SkillsScreen { align: center middle; }
+    #skills-box { width: 95%; height: 85%; background: $panel; border: solid $primary; }
+    #skills-table { height: 1fr; }
+    """
+    BINDINGS = [Binding("escape", "close", "닫기")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="skills-box"):
+            yield DataTable(id="skills-table")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#skills-table", DataTable)
+        table.add_columns("서버", "scope", "이름", "설명")
+        table.cursor_type = "row"
+        table.loading = True
+
+    def show_rows(self, rows: list[SkillInfo]) -> None:
+        table = self.query_one("#skills-table", DataTable)
+        if not table.columns:
+            table.add_columns("서버", "scope", "이름", "설명")
+        table.loading = False
+        table.clear()
+        for i in rows:
+            table.add_row(i.server, i.scope, i.name, i.description[:80])
 
     def action_close(self) -> None:
         self.dismiss(None)

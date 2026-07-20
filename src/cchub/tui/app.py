@@ -11,6 +11,8 @@ from textual.widgets import Footer, Input, RichLog, Static, Tree
 from textual.worker import get_current_worker
 
 from cchub import stats as stats_mod, tmux
+from cchub.skills import local_skills, scan_skills
+from cchub.tmux import CLAUDE_COMMANDS
 from cchub.briefing import generate_briefing
 from cchub.config import Config, cchub_dir, load_config
 from cchub.index import SessionIndex
@@ -18,7 +20,7 @@ from cchub.results import collect_results
 from cchub.sessions import LiveSession
 from cchub.ssh import SSHRemote
 from cchub.tui.data import RemoteFactory, ServerSnapshot, collect_sessions
-from cchub.tui.screens import SearchScreen, HistoryScreen
+from cchub.tui.screens import SearchScreen, HistoryScreen, SkillsScreen
 
 
 class ConfirmSend(ModalScreen[bool]):
@@ -63,6 +65,7 @@ class CchubApp(App):
         Binding("t", "toggle_transcript", "transcript"),
         Binding("slash", "search", "검색"),
         Binding("h", "history", "이력"),
+        Binding("s", "skills", "스킬"),
         Binding("r", "collect_results", "결과수집"),
         Binding("A", "brief", "브리핑"),
     ]
@@ -246,6 +249,29 @@ class CchubApp(App):
             if result:
                 self.open_transcript(*result)
         self.push_screen(HistoryScreen(self.index), _open)
+
+    def action_skills(self) -> None:
+        screen = SkillsScreen()
+        self.push_screen(screen)
+        self.load_skills(screen)
+
+    @work(thread=True, exclusive=True, group="skills", exit_on_error=False)
+    def load_skills(self, screen: SkillsScreen) -> None:
+        worker = get_current_worker()
+        rows = local_skills(Path.home() / ".claude" / "skills")
+        for name, s in self.cfg.servers.items():
+            if worker.is_cancelled:
+                return
+            try:
+                remote = self.remote_factory(s.host)
+                cwds = [p.cwd for p in tmux.list_panes(remote)
+                        if p.command in CLAUDE_COMMANDS]
+                rows += scan_skills(remote, name, cwds, s.skill_paths)
+            except Exception:  # noqa: BLE001 - 서버별 격리
+                continue
+        if worker.is_cancelled:
+            return
+        self.call_from_thread(screen.show_rows, rows)
 
     def action_collect_results(self) -> None:
         if not self.cfg.servers:
