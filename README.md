@@ -1,197 +1,270 @@
 # cchub
 
-버전 0.4.0. 여러 서버에서 돌아가는 Claude Code 세션을 한 곳에서
-확인·검색·제어하는 CLI. 각 서버에 SSH로 접속해 `~/.claude/projects`를
-로컬로 미러링하고, tmux pane을 찾아 실행 중인 세션과 매칭한다. 0.2.0부터는
-`cchub tui`로 여러 서버의 세션을 한 화면에서 볼 수 있는 인터랙티브 뷰를
-제공한다 (의존성 `textual>=8,<9`). 0.3.0에서는 전 서버 통합 이력(`h`)·전문
-검색(`/`), 실험 결과 수집(`r`/`cchub results`), 종합 브리핑 생성(`A`/`cchub brief`),
-서버 간 파일 중계(`cchub push`)가 추가됐다. 0.4.0에서는 서버별 skill(개인+
-프로젝트) 조회/가져오기/배포/서버 간 복사/삭제(`cchub skills ...`, TUI `s`)가
-추가됐다.
+**여러 서버에 흩어진 Claude Code 세션을 한 곳에서 보고, 검색하고, 조종하는 허브.**
+
+여러 대의 서버에서 tmux 안에 Claude Code를 띄워놓고 일하다 보면 "어느 서버에서
+무슨 작업을 하고 있었지?", "그 실험 결과 어디 있지?", "이 스킬 저 서버에도
+깔아야 하는데"가 반복됩니다. cchub는 로컬 머신 한 곳에서 이 모든 것을
+해결합니다 — **서버에는 아무것도 설치하지 않습니다** (sshd, tmux, rsync만 있으면 됨).
+
+```
+┌─ 로컬 머신 ────────────────────────────────┐        ┌─ 서버 1..N ──────────┐
+│  cchub CLI / TUI                           │  ssh   │  tmux 안의            │
+│  · 세션 트리·live 뷰·프롬프트 전송           │ ─────▶ │  Claude Code 세션들   │
+│  · 전 서버 이력 검색 (SQLite FTS)           │ rsync  │  ~/.claude/projects   │
+│  · 실험 결과 수집·종합 브리핑               │ ◀───── │  실험 결과 파일        │
+│  · skill 조회/배포/복사/삭제                │        │  .claude/skills       │
+└────────────────────────────────────────────┘        └──────────────────────┘
+```
+
+주요 기능:
+
+- **세션 현황판** — 서버별로 tmux에서 돌고 있는 Claude 세션을 번호·상태(작업중●/입력대기◌/유휴▶)·제목과 함께 나열
+- **원격 프롬프트 전송** — 로컬에서 특정 서버의 특정 세션에 프롬프트 주입 (전송 전 pane 검증, 전송 후 반영 확인)
+- **영구 이력 + 전문 검색** — 모든 서버의 대화 이력을 로컬에 미러링·인덱싱. 서버가 30일 후 로그를 지워도 로컬엔 영구 보존, FTS로 즉시 검색
+- **실험 결과 수집·종합** — 서버별 결과 파일을 글롭 패턴으로 수집하고, 로컬 Claude Code에 붙여넣을 종합 브리핑 프롬프트 생성
+- **파일 중계** — 로컬↔서버, 서버↔서버(로컬 경유) 파일 전송
+- **skill 통합 관리** — 서버별 개인/프로젝트 skill 조회, 가져오기, 배포, 서버 간 복사, 삭제
+- **TUI** — 위 전부를 한 화면에서. 상단엔 서버별 CPU/메모리 실시간 스파크라인
+- **Claude API 미사용** — LLM 호출 없이 로컬 파일과 SSH만 사용. 분석·종합은 사용자의 로컬 Claude Code 세션이 수행
+
+## 요구사항
+
+- **로컬**: Python ≥ 3.13, `rsync`, OpenSSH 클라이언트
+- **각 서버**: sshd(키 기반 인증), `tmux`, `rsync` — 그 외 설치 불필요
+- 서버의 Claude Code 세션은 tmux 안에서 실행 중이어야 함
 
 ## 설치
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+git clone https://github.com/<owner>/cchub.git
+cd cchub
+python3 -m venv .venv
+.venv/bin/pip install -e .
+# 이후 .venv/bin/cchub 로 실행하거나, PATH에 연결:
+ln -s "$PWD/.venv/bin/cchub" ~/.local/bin/cchub
 ```
 
-## 시작하기
+## 빠른 시작
 
 ```bash
 cchub init                 # ~/.cchub/config.toml 템플릿 생성
-# config.toml에 서버를 추가한 뒤:
+$EDITOR ~/.cchub/config.toml   # 서버 추가 (아래 예시 참고)
 cchub sync                 # 모든 서버 미러링 + 인덱싱
 cchub list                 # 서버별 live 세션 목록
+cchub tui                  # 또는 바로 TUI로
 ```
 
-### config.toml 예시
+### config.toml
 
 ```toml
 [general]
-sync_interval = 30
-stats_interval = 2
+sync_interval = 30           # TUI 자동 동기화 주기 (초)
+stats_interval = 2           # CPU/메모리 폴링 주기 (초)
 
 [servers.srv1]
-host = "user@10.0.0.11"      # ssh 접속 문자열. ~/.ssh/config의 Host 별칭도 그대로 사용 가능
-results = ["~/exp/**"]       # 결과 수집 경로 — cchub results/r로 미러링
+host = "user@10.0.0.11"      # ssh 접속 문자열
+results = ["~/exp/**", "~/bench/*.json"]   # 결과 수집 글롭 패턴 (선택)
 
 [servers.srv2]
-host = "my-alias"            # 예: ~/.ssh/config에 등록된 Host my-alias
-claude_dir = "~/.claude"      # 원격의 claude 홈 (기본값)
-skill_paths = ["~/envector-msa"]  # 프로젝트 skill 스캔 추가 경로 (활성 pane cwd 외)
+host = "my-alias"            # ~/.ssh/config 의 Host 별칭도 그대로 동작 (포트/키 포함)
+claude_dir = "~/.claude"     # 원격 claude 홈 (기본값)
+skill_paths = ["~/my-project"]   # 프로젝트 skill 스캔 추가 경로 (선택)
 ```
 
-`host`는 `ssh <host>`로 그대로 넘어가므로, `user@ip`든 `~/.ssh/config`의
-`Host` 별칭(포트/키 파일 등 포함)이든 동일하게 동작한다.
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `general.sync_interval` | 30 | TUI가 세션 목록을 자동 갱신하는 주기(초) |
+| `general.stats_interval` | 2 | CPU/메모리 바 폴링 주기(초) |
+| `servers.<이름>.host` | (필수) | `ssh <host>`로 그대로 전달 — `user@ip` 또는 ssh config 별칭 |
+| `servers.<이름>.results` | `[]` | `cchub results`가 수집할 원격 글롭 패턴들 |
+| `servers.<이름>.claude_dir` | `~/.claude` | 원격 Claude Code 데이터 디렉터리 |
+| `servers.<이름>.skill_paths` | `[]` | tmux에 안 떠 있어도 skill을 스캔할 프로젝트 경로들 |
 
-## 명령어
+모든 로컬 상태는 `~/.cchub`에 저장됩니다 (환경변수 `CCHUB_DIR`로 변경 가능).
 
-| 명령어 | 설명 |
-|---|---|
-| `cchub init` | 설정 템플릿(`config.toml`)을 생성한다 |
-| `cchub sync` | 등록된 모든 서버의 `~/.claude/projects`를 미러링하고 새 이벤트를 인덱싱한다 |
-| `cchub list` | 동기화 후 서버별로 tmux에서 돌고 있는 claude 세션 목록을 번호·상태와 함께 보여준다 |
-| `cchub send <server> <n> <prompt>` | 지정한 세션의 tmux pane에 프롬프트를 전송한다 |
-| `cchub tail <server> <n> [-n N] [--live]` | 세션의 최근 대화를 보여준다. `--live`는 인덱스 대신 tmux 화면을 그대로 캡처한다 |
-| `cchub search <query>` | 모든 서버의 전체 이력에서 전문(FTS) 검색을 한다 |
-| `cchub reindex` | 캐시(미러된 파일)에서 인덱스를 처음부터 재구축한다 |
-| `cchub tui` | 모든 서버의 세션을 한 화면(트리+상세+CPU바)에서 보고 제어하는 인터랙티브 TUI를 띄운다 |
-| `cchub results [server]` | config의 `results` 패턴에 따라 실험 결과 파일을 `~/.cchub/results/<server>/`로 수집한다 (생략 시 전체 서버) |
-| `cchub brief` | 수집된 결과 + 최근 세션 요약을 담은 브리핑 md를 생성하고, 로컬 Claude Code에 붙여넣을 프롬프트를 출력한다 |
-| `cchub push <src> <dst>` | 서버 간/로컬 파일을 중계한다. `<서버>:<경로>` 또는 로컬 경로를 받으며, 서버↔서버 전송은 로컬을 경유한다 |
-| `cchub skills list [server]` | 로컬 라이브러리(`~/.claude/skills`) + 지정 서버(생략 시 전체)의 개인/프로젝트 skill을 나열한다 |
-| `cchub skills pull <server> <name> [--force]` | 서버의 skill(개인 우선, 없으면 유일한 프로젝트 skill)을 로컬 라이브러리로 가져온다 |
-| `cchub skills deploy <name> <servers...>` | 로컬 라이브러리의 skill을 서버들의 **개인 skill**로 배포한다(덮어쓰기, `--delete` 없음) |
-| `cchub skills copy <src_server> <name> <dst_servers...>` | 한 서버의 skill을 로컬 경유로 다른 서버들의 개인 skill로 복사한다 |
-| `cchub skills delete <server> <name> [--yes]` | 서버의 개인 skill을 삭제한다. `--yes` 없으면 skill 이름을 다시 입력해야 확인된다 |
+## CLI 사용법
+
+### 세션 확인·제어
+
+```bash
+cchub sync                        # 전 서버 ~/.claude/projects 미러링 + 증분 인덱싱
+cchub list                        # 서버별 live 세션: 번호·상태·프로젝트·제목
+cchub send srv1 3 "실험 이어서 돌려줘"   # 서버1의 3번 세션에 프롬프트 전송
+cchub tail srv1 3                 # 그 세션의 최근 대화 (인덱스 기반)
+cchub tail srv1 3 --live          # tmux 화면을 그대로 캡처해서 보기
+```
+
+- `send`는 전송 직전에 대상 pane이 살아있는 Claude 세션인지 검증하고,
+  전송 후 화면에 반영됐는지 1회 확인합니다.
+- 세션이 작업 중(●)이어도 전송은 가능합니다 — Claude Code가 입력을 큐잉합니다.
+
+### 이력·검색
+
+```bash
+cchub search "NUMA 실험"          # 전 서버 전체 이력 전문(FTS) 검색
+cchub reindex                     # 로컬 미러에서 인덱스 전체 재구축 (SSH 불필요)
+```
+
+서버 쪽이 오래된 로그를 정리해도 로컬 미러에는 영구 보존됩니다
+(`rsync --delete`를 쓰지 않음).
+
+### 실험 결과 수집·종합
+
+여러 서버의 실험 결과를 모아 로컬 Claude Code로 종합 리포트를 만드는 흐름:
+
+```bash
+# 1. config의 results 패턴에 따라 수집 (→ ~/.cchub/results/<server>/)
+cchub results                     # 전체 서버 (또는: cchub results srv1)
+
+# 2. 브리핑 생성 — 수집 파일 목록 + 서버별 최근 세션 요약을 md로 정리
+cchub brief
+# 출력된 프롬프트를 로컬 Claude Code 세션에 붙여넣으면 종합 리포트 작성 시작
+```
+
+cchub 자체는 LLM을 호출하지 않습니다 — 브리핑 파일과 붙여넣을 프롬프트만
+만들고, 실제 분석은 사용자의 로컬 Claude 세션이 수행합니다.
+
+### 파일 중계
+
+```bash
+cchub push srv1:~/exp/out.json ./results/     # 서버 → 로컬
+cchub push ./data.json srv2:~/inbox           # 로컬 → 서버
+cchub push srv1:~/exp/out.json srv2:~/inbox   # 서버 → 서버 (로컬 경유, 임시파일 자동 정리)
+```
+
+글롭(`srv1:~/exp/*.json`)은 원격 셸이 확장합니다.
+
+### skill 통합 관리
+
+여러 서버에 흩어진 Claude Code skill(`SKILL.md` 디렉터리)을 관리합니다.
+
+```bash
+cchub skills list                          # 로컬 라이브러리 + 전 서버 skill 조회
+cchub skills pull srv1 e2e-run             # 서버 skill → 로컬 ~/.claude/skills/
+cchub skills deploy my-skill srv1 srv2     # 로컬 skill → 서버들의 개인 skill로 배포
+cchub skills copy srv1 e2e-run srv2 srv3   # 서버 간 복사 (로컬 경유)
+cchub skills delete srv1 old-skill         # 개인 skill 삭제 (이름 재입력 확인, --yes로 생략)
+```
+
+동작 원칙:
+
+- **조회는 개인 + 프로젝트 skill 모두**: 서버당 (1) `~/.claude/skills`,
+  (2) 현재 tmux에 살아있는 claude pane들의 cwd 아래 `.claude/skills`,
+  (3) config `skill_paths`에 등록한 경로 — 를 합쳐 스캔합니다.
+- **쓰기(배포/삭제)는 개인 skill(`~/.claude/skills`)만**: 프로젝트 skill은
+  해당 저장소의 git으로 관리되는 것이 원칙이라 cchub가 절대 만들거나 지우지
+  않습니다 (쓰기 경로가 코드 수준에서 고정돼 있음).
+- `pull`은 개인 skill을 우선 매칭하고, 없으면 프로젝트 skill 중 유일 매칭일
+  때만 가져옵니다. 로컬에 이미 있으면 `--force`가 필요합니다.
+- `deploy`/`copy`는 rsync 덮어쓰기(`--delete` 없음) — 로컬에서 지운 파일이
+  서버에 남을 수 있습니다. 완전히 갈아엎으려면 `delete` 후 `deploy`.
+- `delete`는 skill 이름 재입력 확인 + 이름 검증(`[A-Za-z0-9_-]+`) + 고정 경로
+  프리픽스로 실수·경로 탈출을 차단합니다.
 
 ## TUI (`cchub tui`)
 
-서버 트리에서 세션을 고르면 오른쪽에 live tmux 화면(또는 저장된
-transcript)이 보이고, 상단 바에는 서버별 CPU/메모리 스파크라인이 주기적으로
-갱신된다. 하단 입력창에 프롬프트를 적고 Enter를 누르면 선택한 세션의 pane으로
-전송된다 (세션이 작업 중이면 먼저 확인을 받는다).
-
-```bash
-cchub tui
 ```
-
-### 키맵
+┌──────────────────────────────────────────────────────────────┐
+│ srv1 ▂▄▆▂ 34% 12G/64G   srv2 ▆▇▇▆ 78% 41G/128G              │ ← CPU/메모리 (c 토글)
+├───────────────┬──────────────────────────────────────────────┤
+│ ▼ srv1        │  [live] 선택한 세션의 tmux 화면 또는 transcript │
+│   1 ● proj-a  │                                              │
+│   2 ◌ proj-b  │  ──────────────────────────────              │
+│ ▼ srv2        │  > 프롬프트 입력 후 Enter로 전송               │
+│   1 ▶ bench   │                                              │
+└───────────────┴──────────────────────────────────────────────┘
+  ● 작업중   ◌ 입력대기   ▶ 유휴
+```
 
 | 키 | 동작 |
 |---|---|
+| `↑↓` + `Enter` | 트리에서 세션 선택 |
+| 입력창 `Enter` | 선택 세션에 프롬프트 전송 (작업중이면 y/n 확인 모달) |
+| `t` | 상세 패널: live tmux 화면 ↔ 저장된 transcript 전환 |
+| `f` | 팔로우 모드 — 2초마다 화면 자동 새로고침 토글 |
+| `c` | CPU/메모리 바 토글 (끄면 폴링도 중단) |
+| `/` | 전 서버 FTS 검색 → 행 선택 시 해당 세션 transcript 표시 |
+| `h` | 전 서버 이력 타임라인 → 입력창으로 즉시 필터링 |
+| `r` | 전 서버 실험 결과 수집 (`cchub results` 동일) |
+| `A` | 종합 브리핑 생성 + 붙여넣을 프롬프트 표시 (`cchub brief` 동일) |
+| `s` | 전 서버 skill 조회 (읽기 전용 — 배포/삭제는 CLI로) |
+| `y` | 즉시 동기화 (기본은 `sync_interval`마다 자동) |
 | `q` | 종료 |
-| `y` | 전체 서버 강제 동기화 (트리 새로고침) |
-| `c` | CPU/메모리 바 표시 토글 (끄면 폴링도 멈춘다) |
-| `f` | 선택한 세션 화면을 주기적으로 자동 새로고침(팔로우) 토글 |
-| `t` | 상세 패널을 live tmux 화면 ↔ 저장된 transcript로 전환 |
-| `/` | 전 서버 통합 FTS 검색 모달을 연다. 행을 고르면 해당 세션의 transcript를 상세 패널에 띄운다 |
-| `h` | 전 서버 통합 이력(타임라인) 모달을 연다. 입력창에 서버/프로젝트/제목 부분 문자열로 즉시 필터링한다 |
-| `r` | config의 `results` 패턴에 따라 등록된 모든 서버의 실험 결과를 수집한다 (`cchub results`와 동일 동작, 백그라운드 워커) |
-| `A` | 수집된 결과 + 최근 세션을 종합한 브리핑 md를 생성하고, 로컬 Claude Code에 붙여넣을 프롬프트를 상세 패널에 띄운다 (`cchub brief`와 동일) |
-| `s` | 로컬 라이브러리 + 전 서버(활성 pane cwd·`skill_paths` 기준)의 skill을 조회하는 화면을 연다 (읽기 전용 — 배포/삭제는 `cchub skills`로) |
-| `Enter` (입력창) | 프롬프트를 선택된 세션에 전송. 세션이 작업 중(●)이면 `y`/`n` 확인 후 전송 |
 
-## 결과 수집·종합 워크플로우
+서버가 접속 불가여도 TUI는 계속 동작합니다 — 해당 서버만 ⚠/⨯offline으로
+표시되고 나머지는 정상 갱신됩니다.
 
-여러 서버에서 돌린 실험 결과를 한 곳에 모아 로컬 Claude Code로 검토하는 흐름:
+## 로컬 Claude Code와 함께 쓰기
 
-1. `config.toml`의 `[servers.*]`에 `results` 패턴(글롭)을 등록한다 — 예:
-   `results = ["~/exp/**"]`.
-2. `cchub results` (또는 TUI의 `r`)로 등록된 모든 서버의 패턴을
-   `~/.cchub/results/<server>/`에 미러링한다. 서버별로 실패한 패턴만
-   격리해서 나머지는 계속 진행한다.
-3. `cchub brief` (또는 TUI의 `A`)로 수집된 결과 파일 목록 + 서버별 최근
-   세션 요약을 묶은 브리핑 md(`~/.cchub/results/briefing-<시각>.md`)를
-   생성한다. cchub는 이 파일을 읽지 않고, 로컬 Claude Code 세션에
-   그대로 붙여넣을 프롬프트만 출력한다 — 실제 분석·종합은 사용자가 로컬
-   Claude에 프롬프트를 붙여넣어 수행한다 (cchub가 로컬 claude를 자동
-   실행하지는 않는다).
-4. 특정 파일만 다른 서버(또는 로컬)로 옮기고 싶으면 `cchub push <src> <dst>`를
-   쓴다. 인자는 `<서버>:<경로>` 또는 로컬 경로이며, 서버 간(A→B) 전송은
-   중간에 로컬을 경유한다 (서버끼리 직접 통신하지 않는다).
+cchub의 CLI는 로컬 Claude Code 세션의 손발이 되도록 설계됐습니다.
+로컬 Claude에게 이렇게 말하면:
 
-## skill 통합 관리
+> "서버 1의 3번 세션에서 배치 크기 128로 실험 다시 돌려줘"
+> "srv2의 결과 파일들 가져와서 srv3에도 넣어줘"
+> "e2e-run 스킬 전 서버에 배포해줘"
 
-여러 서버에 흩어진 Claude Code skill(`SKILL.md` 디렉터리)을 한 곳에서
-조회·이동시키는 기능. `cchub skills` 서브커맨드와 TUI `s` 화면으로 접근한다.
+Claude가 `cchub send srv1 3 "..."`, `cchub push ...`, `cchub skills deploy ...`를
+알아서 호출합니다. 결과 종합도 마찬가지로 `cchub brief`가 출력한 프롬프트를
+로컬 Claude에 붙여넣는 것으로 이어집니다.
 
-- **로컬 라이브러리**: `~/.claude/skills` (cchub를 실행하는 로컬 머신의 개인
-  skill 디렉터리)를 그대로 라이브러리로 쓴다. `pull`은 여기로 받고, `deploy`/
-  `copy`는 여기서 보낸다.
-- **조회는 개인 + 프로젝트 skill 모두 대상**이다. 서버 하나당 skill 스캔은
-  다음 두 경로를 합쳐서 이뤄진다: (1) 그 서버에서 현재 tmux에 살아있는 claude
-  pane들의 작업 디렉터리(cwd) 아래 `.claude/skills`, (2) config의
-  `[servers.*].skill_paths`에 직접 등록한 경로들. 즉 pane이 꺼져 있어도
-  `skill_paths`에 넣어두면 계속 조회된다.
-- **쓰기(배포/삭제)는 개인 skill만 대상**이다 — 프로젝트 skill은 그 프로젝트의
-  git 저장소로 관리되는 것이 원칙이라 cchub에서 만들거나 지우지 않는다
-  (`deploy`/`delete` 모두 경로가 `~/.claude/skills/<name>`으로 고정돼 있어
-  프로젝트 skill 경로에는 애초에 쓸 수 없다).
-- **`deploy`/`copy`는 `rsync`로 덮어쓰는 방식이라 `--delete`를 쓰지 않는다** —
-  로컬에서 파일을 지운 뒤 재배포해도 서버에는 예전 파일이 그대로 남을 수
-  있다. 파일을 완전히 갈아엎으려면 `delete` 후 다시 `deploy`한다.
-- **`delete`는 실수 방지를 위해 skill 이름을 다시 입력하는 확인**을 거친다
-  (`--yes`로 건너뛸 수 있음). 이름 검증(`[A-Za-z0-9_-]+`)과 고정 경로 프리픽스
-  덕분에 `../` 등으로 다른 경로를 지울 수 없다.
+## 동작 원리
+
+- **미러링**: 각 서버의 `~/.claude/projects/*.jsonl`(대화 로그, append-only)을
+  rsync로 로컬 `~/.cchub/cache/<server>/`에 증분 복사. 원본은 항상 서버,
+  로컬은 읽기 전용 사본이라 충돌이 없습니다.
+- **인덱싱**: 미러된 JSONL에서 바이트 오프셋 기반으로 새로 늘어난 부분만
+  파싱해 SQLite(FTS5)에 반영. 포맷이 낯선 줄은 조용히 건너뛰는 관대한
+  파서라 Claude Code 버전이 바뀌어도 크래시하지 않습니다.
+- **세션 매칭**: tmux pane 목록과 미러된 세션 파일을 프로젝트 경로(cwd)로
+  매칭. 같은 cwd에 pane이 여러 개면 pane 생성 시각 ↔ 세션 시작 시각을
+  가까운 순서로 페어링합니다.
+- **모든 블로킹 작업**(ssh/rsync)은 TUI에서 백그라운드 스레드로 실행되고,
+  서버 하나의 실패가 다른 서버나 UI를 막지 않습니다.
 
 ## 데이터 위치
 
-기본적으로 `~/.cchub` 아래에 모든 상태를 둔다 (환경변수 `CCHUB_DIR`로 변경 가능):
+`~/.cchub` (환경변수 `CCHUB_DIR`로 변경):
 
-- `config.toml` — 설정
-- `cache/<server>/projects/` — 서버별 미러링된 `~/.claude/projects` 원본
-- `index.db` — SQLite FTS5 세션 인덱스
-- `cm/` — (레거시) ssh ControlMaster 소켓. 실제 소켓은 경로 길이 제한을 피하기
-  위해 시스템 임시 디렉터리(`$TMPDIR` 또는 `/tmp`) 아래
-  `cchub-cm-<uid>-<hash>/`에 둔다
+| 경로 | 내용 |
+|---|---|
+| `config.toml` | 설정 |
+| `cache/<server>/projects/` | 서버별 미러링된 대화 로그 (영구 보존) |
+| `index.db` | SQLite FTS5 세션 인덱스 (언제든 `reindex`로 재생성 가능) |
+| `results/<server>/` | 수집된 실험 결과 |
+| `results/briefing-*.md` | 생성된 브리핑 |
+| `relay/` | 서버 간 전송 임시 경유지 (자동 정리) |
 
-기존 `index.db`가 구버전 스키마(메타데이터 컬럼까지 FTS 인덱싱하던 버전)로
-남아 있으면 여는 즉시 자동으로 비워지며, 다음 `cchub sync`(또는
-`cchub reindex`)에서 새 스키마로 재구축된다.
+ssh ControlMaster 소켓은 AF_UNIX 경로 길이 제한을 피하기 위해 시스템 임시
+디렉터리(`/tmp/cchub-cm-<uid>-<hash>/`)에 둡니다.
 
-## 제약 사항
+## 제약·알려진 한계
 
-- 각 원격 서버에는 `tmux`와 `rsync`, 키 기반 SSH 접속이 준비돼 있어야 한다.
-- 미러링에는 `rsync --delete`를 쓰지 않는다 — 원격에서 오래된 세션 로그가
-  정리되더라도 로컬에 모인 이력은 영구 보존된다.
-- tmux pane은 `pane_current_command`가 `claude` 또는 `node`인 것만 세션
-  후보로 본다 (claude 실행 방식에 따라 다르게 보이기 때문). 그 외 명령(예:
-  `cat`, `bash`)이 돌고 있는 pane은 목록/전송 대상에서 제외된다.
-- 같은 작업 디렉터리(cwd)에서 claude pane을 두 개 이상 띄우는 경우: M3에서
-  pane 생성 시각과 세션(jsonl) 시작 시각을 가까운 순서로 페어링하는 방식으로
-  완화했다 — 이전(M1)의 "무조건 최신 세션에 매칭"보다는 정확하지만, 여전히
-  시각 기반 휴리스틱이라 두 pane이 거의 동시에 시작되면 어긋날 수 있다.
-  `/proc`의 열린 파일 디스크립터로 pane→transcript를 직접 매칭하는 방식도
-  검토했으나, claude 프로세스가 transcript 파일 fd를 상시 열어두지 않는다는
-  것을 실측으로 확인해 채택하지 않았다.
+- tmux pane 중 `pane_current_command`가 `claude`/`node`인 것만 세션 후보로
+  봅니다. 다른 명령이 도는 pane은 목록·전송 대상에서 제외됩니다.
+- 같은 cwd에 claude pane을 여러 개 띄우면 시각 기반 페어링 휴리스틱을
+  씁니다 — 거의 동시에 시작된 두 세션은 어긋날 수 있습니다.
+  (`/proc` fd 기반 정확 매칭은 claude가 transcript fd를 상시 열어두지
+  않아 불가능함을 실측으로 확인했습니다.)
+- 전송 후 반영 확인은 화면 캡처 기반 best-effort라, 아주 긴 프롬프트가
+  줄바꿈되면 "반영 미확인" 경고가 나올 수 있습니다 (전송 자체는 정상).
+- 미러/배포 모두 `rsync --delete`를 쓰지 않습니다 — 이력은 영구 보존되고,
+  skill 재배포 시 삭제된 파일은 서버에 남을 수 있습니다.
 
-## 스모크 테스트
+## 개발
 
-`cchub-smoke` (localhost, SSH 포트 7777)를 서버로 등록해 실제 SSH·rsync·tmux
-경로를 검증했다: `sync`가 실제 `~/.claude/projects`를 미러링·인덱싱하고,
-`list`/`search`/`tail`(인덱스 및 `--live` 캡처 모두)이 실제 데이터로 동작함을
-확인했다. 실제 `~/.claude`에서 파일 22개·이벤트 6658건이 동기화됐고, 살아있는
-tmux pane들이 정상적으로 발견됐다. 이 과정에서 `CCHUB_DIR`이 깊은 경로에 있을
-때 ssh `ControlPath`가 AF_UNIX 소켓 108바이트 제한을 넘어 실패하는 결함을
-발견해 수정했다.
+```bash
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/pytest -q          # 단위·TUI(headless pilot) 테스트
+```
 
-M3에서는 같은 `cchub-smoke` 서버로 TUI의 `h`(이력)/`/`(검색)/`A`(브리핑)까지
-실제 데이터로 검증했다: 이력 모달에 실제 세션 23건이 열거되고, "envector"
-검색에 실제 이력에서 매칭이 나오며, `A`로 실제 최근 세션 요약이 담긴
-브리핑 md가 로컬에 생성됨을 확인했다 (`r`은 이 서버의 config에 `results`
-패턴이 없어 별도 확인하지 않음).
+실물 통합 테스트는 `cchub-smoke`라는 ssh alias(자기 자신으로의 SSH)가 있을
+때만 실행되고 없으면 자동 skip됩니다. 이 테스트는 실제 SSH·rsync·tmux 경로로
+sync/list/search/TUI/skill 왕복까지 검증합니다.
 
-M4에서는 skill 기능을 같은 서버의 실제 데이터로 검증했다: `skill_paths`로
-`~/envector-msa`를 지정해 실제 프로젝트 skill 9개(예: `e2e-run`, description
-포함)를 정상 스캔했고, 고유한 이름(`cchub-smoke-roundtrip`)의 임시 skill을
-개인 skill로 `deploy` → 재스캔으로 확인 → `delete`하는 왕복까지 성공했다
-(테스트 종료 후 서버의 `~/.claude/skills`는 다시 비어 있음). 이 과정에서
-서버의 `~/.claude/skills`가 존재하지 않는 디렉터리(`~/.code-assistant/claude/skills`)를
-가리키는 깨진 심볼릭 링크였던 사실을 발견했다 — cchub 코드의 결함은
-아니었지만(`mkdir -p`가 깨진 심볼릭 링크 경로 아래로는 쓸 수 없는 건 정상
-동작), 그 상태로는 개인 skill 배포 자체가 불가능해 심볼릭 링크가 가리키는
-빈 디렉터리를 생성해 링크를 유효하게 만들었다(그 안의 내용물은 건드리지
-않음).
+## 버전
+
+- **0.4.0** — skill 통합 관리 (`cchub skills`, TUI `s`)
+- **0.3.0** — 통합 이력(`h`)·검색(`/`), 결과 수집(`r`)·브리핑(`A`), 파일 중계(`push`), same-cwd 세션 페어링, 전송 전/후 검증
+- **0.2.0** — TUI (트리·live 뷰·프롬프트 전송·CPU 바)
+- **0.1.0** — 코어 CLI (sync/list/send/tail/search/reindex)
