@@ -670,3 +670,18 @@ async def test_unsplit_while_pane1_active_resets(tmp_path):
         assert app.active == 0 and len(app.panes) == 1
         await pilot.press("o")            # 단일 상태에서 o는 no-op
         assert app.active == 0
+
+
+async def test_apply_snapshots_notifies_once_per_error(tmp_path, monkeypatch):
+    app = make_app(tmp_path)
+    notes = []
+    async with app.run_test() as pilot:
+        monkeypatch.setattr(app, "notify", lambda msg, **kw: notes.append(msg))
+        bad = {"srv1": ServerSnapshot(server="srv1", sessions=[], error="ssh refused")}
+        app.apply_snapshots(bad)
+        app.apply_snapshots(bad)  # 동일 에러 재갱신 — 추가 알림 없어야
+        assert sum("srv1" in n and "doctor" in n for n in notes) == 1
+        # 에러 사라졌다가 다시 발생하면 재알림
+        app.apply_snapshots({"srv1": ServerSnapshot(server="srv1", sessions=[])})
+        app.apply_snapshots(bad)
+        assert sum("srv1" in n and "doctor" in n for n in notes) == 2

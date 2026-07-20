@@ -127,6 +127,7 @@ class CchubApp(App):
 
     def on_mount(self) -> None:
         self.snapshots: dict[str, ServerSnapshot] = {}
+        self._last_errors: dict[str, str] = {}
         self._follow_timer = self.set_interval(2, self._follow_tick, pause=True)
         self.set_interval(self.cfg.sync_interval, self.action_refresh)
         self.stats_on = True
@@ -174,6 +175,18 @@ class CchubApp(App):
                 mark = self._STATE_MARK.get(ls.state, "?")
                 node.add_leaf(f"{ls.number} {mark} {ls.project}  {ls.title}", data=ls)
         self._reconcile_selection(tree)
+        self._notify_new_errors(snaps)
+
+    def _notify_new_errors(self, snaps: dict[str, ServerSnapshot]) -> None:
+        for name, s in snaps.items():
+            prev = self._last_errors.get(name, "")
+            if s.error and s.error != prev:
+                self.notify(f"{name} 동기화 실패 — cchub doctor로 진단해 보세요",
+                            severity="error")
+            if s.error:
+                self._last_errors[name] = s.error
+            else:
+                self._last_errors.pop(name, None)
 
     def _reconcile_selection(self, tree: Tree) -> None:
         leaves = [leaf for node in tree.root.children for leaf in node.children]
