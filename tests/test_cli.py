@@ -15,7 +15,7 @@ PANES = "%5\tmain:0.0\t/home/u/proj\tclaude\t100\n"
 def env(tmp_path, monkeypatch):
     """CCHUB_DIR 격리 + config + 미러된 캐시 + FakeRemote 주입."""
     monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
-    (tmp_path / "config.toml").write_text('[servers.srv1]\nhost = "u@h"\n')
+    (tmp_path / "config.toml").write_text('[servers.srv1]\nhost = "u@h"\nresults = ["~/exp/*"]\n')
     proj = tmp_path / "cache" / "srv1" / "projects" / "-home-u-proj"
     proj.mkdir(parents=True)
     shutil.copy(FIXTURE, proj / "s-1.jsonl")
@@ -90,3 +90,9 @@ def test_corrupt_index_db_is_handled(tmp_path, monkeypatch, capsys):
     rc = cli.main(["search", "x"])
     assert rc == 1
     assert "오류" in capsys.readouterr().err  # traceback이 아니라 한 줄 메시지
+
+
+def test_results_command(env, capsys):
+    tmp, fake = env
+    assert cli.main(["results", "srv1"]) == 0
+    assert "srv1" in capsys.readouterr().out

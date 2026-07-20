@@ -151,6 +151,24 @@ def cmd_reindex(_args) -> int:
     return 0
 
 
+def cmd_results(args) -> int:
+    from cchub.results import collect_results
+    cfg, root, _index = _ctx()
+    servers = [args.server] if args.server else list(cfg.servers)
+    ok = True
+    for name in servers:
+        if name not in cfg.servers:
+            print(f"알 수 없는 서버: {name}", file=sys.stderr)
+            return 1
+        rep = collect_results(cfg, root, name, _make_remote)
+        if rep.ok:
+            print(f"{name}: ok → {root / 'results' / name}")
+        else:
+            ok = False
+            print(f"{name}: 실패 패턴 {', '.join(rep.failed)}", file=sys.stderr)
+    return 0 if ok else 1
+
+
 def cmd_tui(_args) -> int:
     from cchub.tui.app import run_tui
     run_tui()
@@ -182,10 +200,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("reindex", help="캐시에서 인덱스 재구축")
     sub.add_parser("tui", help="터미널 UI 실행")
 
+    p = sub.add_parser("results", help="실험 결과 수집 (config의 results 패턴)")
+    p.add_argument("server", nargs="?", help="생략 시 전체 서버")
+
     args = ap.parse_args(argv)
     handler = {
         "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "send": cmd_send,
         "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex, "tui": cmd_tui,
+        "results": cmd_results,
     }[args.cmd]
     try:
         return handler(args)

@@ -10,6 +10,8 @@ class FakeRemote(Remote):
         self.responses = responses or {}
         self.calls: list[list[str]] = []
         self.mirrors: list[tuple[str, Path]] = []
+        self.fetches: list[tuple[str, Path]] = []
+        self.pushes: list[tuple[Path, str]] = []
 
     def run(self, argv: list[str], timeout: int = 15) -> RunResult:
         self.calls.append(list(argv))
@@ -20,4 +22,12 @@ class FakeRemote(Remote):
 
     def mirror(self, remote_dir: str, local_dir: Path, timeout: int = 120) -> RunResult:
         self.mirrors.append((remote_dir, Path(local_dir)))
+        return RunResult(0, "", "")
+
+    def fetch(self, remote_path: str, local_dir, timeout: int = 300) -> RunResult:
+        self.fetches.append((remote_path, Path(local_dir)))
+        return RunResult(0, "", "")
+
+    def push(self, local_path, remote_dir: str, timeout: int = 300) -> RunResult:
+        self.pushes.append((Path(local_path), remote_dir))
         return RunResult(0, "", "")

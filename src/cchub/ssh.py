@@ -40,6 +40,12 @@ class Remote:
     def mirror(self, remote_dir: str, local_dir: Path, timeout: int = 120) -> RunResult:
         raise NotImplementedError
 
+    def fetch(self, remote_path: str, local_dir: Path, timeout: int = 300) -> RunResult:
+        raise NotImplementedError
+
+    def push(self, local_path: Path, remote_dir: str, timeout: int = 300) -> RunResult:
+        raise NotImplementedError
+
 
 class SSHRemote(Remote):
     def __init__(self, host: str):
@@ -66,19 +72,25 @@ class SSHRemote(Remote):
             return RunResult(124, "", f"timeout after {timeout}s")
         return RunResult(p.returncode, p.stdout, p.stderr)
 
-    def mirror(self, remote_dir: str, local_dir: Path, timeout: int = 120) -> RunResult:
-        # --delete 금지: 서버 쪽 30일 정리가 로컬 이력을 지우지 않도록
-        local_dir.mkdir(parents=True, exist_ok=True)
+    def _rsync(self, src: str, dst: str, timeout: int) -> RunResult:
         try:
             p = subprocess.run(
-                [
-                    "rsync", "-az",
-                    "-e", "ssh " + " ".join(self._opts),
-                    f"{self.host}:{remote_dir}/",
-                    str(local_dir) + "/",
-                ],
+                ["rsync", "-az", "-e", "ssh " + " ".join(self._opts), src, dst],
                 capture_output=True, text=True, timeout=timeout,
             )
         except subprocess.TimeoutExpired:
             return RunResult(124, "", f"timeout after {timeout}s")
         return RunResult(p.returncode, p.stdout, p.stderr)
+
+    def mirror(self, remote_dir: str, local_dir: Path, timeout: int = 120) -> RunResult:
+        # --delete 금지: 서버 쪽 30일 정리가 로컬 이력을 지우지 않도록
+        local_dir.mkdir(parents=True, exist_ok=True)
+        return self._rsync(f"{self.host}:{remote_dir}/", str(local_dir) + "/", timeout)
+
+    def fetch(self, remote_path: str, local_dir: Path, timeout: int = 300) -> RunResult:
+        local_dir.mkdir(parents=True, exist_ok=True)
+        return self._rsync(f"{self.host}:{remote_path}", str(local_dir) + "/", timeout)
+
+    def push(self, local_path: Path, remote_dir: str, timeout: int = 300) -> RunResult:
+        src = str(local_path) + ("/" if local_path.is_dir() else "")
+        return self._rsync(src, f"{self.host}:{remote_dir}/", timeout)

@@ -71,3 +71,43 @@ def test_control_path_stays_under_unix_socket_limit_for_long_cchub_dir(monkeypat
     remote = SSHRemote("user@some-very-descriptive-hostname.example.internal")
     control_path = _control_path(remote)
     assert len(control_path.encode()) < 100
+
+
+def test_fetch_builds_rsync(monkeypatch, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    dest = tmp_path / "results" / "srv1"
+    r = SSHRemote("u@h").fetch("~/exp/*.json", dest)
+    assert r.rc == 0
+    cmd = captured["cmd"]
+    assert cmd[0] == "rsync" and "--delete" not in cmd
+    assert cmd[-2] == "u@h:~/exp/*.json"      # 원격 셸이 glob 확장
+    assert cmd[-1] == str(dest) + "/"
+    assert dest.exists()
+
+
+def test_push_dir_sends_contents(monkeypatch, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    d = tmp_path / "payload"
+    d.mkdir()
+    SSHRemote("u@h").push(d, "~/inbox")
+    cmd = captured["cmd"]
+    assert cmd[-2] == str(d) + "/"            # 디렉토리 → 내용물 전송
+    assert cmd[-1] == "u@h:~/inbox/"
+    f = tmp_path / "one.txt"
+    f.write_text("x")
+    SSHRemote("u@h").push(f, "~/inbox")
+    assert captured["cmd"][-2] == str(f)      # 파일 → 그대로
