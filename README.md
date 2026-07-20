@@ -52,6 +52,7 @@ cchub init                 # ~/.cchub/config.toml 템플릿 생성
 $EDITOR ~/.cchub/config.toml   # 서버 추가 (아래 예시 참고)
 cchub sync                 # 모든 서버 미러링 + 인덱싱
 cchub list                 # 서버별 live 세션 목록
+cchub doctor               # (문제 시) 서버별 연결 진단
 cchub tui                  # 또는 바로 TUI로
 ```
 
@@ -98,6 +99,15 @@ cchub tail srv1 3 --live          # tmux 화면을 그대로 캡처해서 보기
 - `send`는 전송 직전에 대상 pane이 살아있는 Claude 세션인지 검증하고,
   전송 후 화면에 반영됐는지 1회 확인합니다.
 - 세션이 작업 중(●)이어도 전송은 가능합니다 — Claude Code가 입력을 큐잉합니다.
+
+### 연결 문제 진단
+
+```bash
+cchub doctor                      # 서버별 SSH·rsync·projects·tmux 점검, 원인별 힌트
+```
+
+sync가 실패하면 `cchub doctor`가 서버별로 무엇이 막혔는지(키 기반 SSH 미설정,
+포트 불일치, rsync 미설치, claude_dir 경로 등) ✓/✗/⚠로 보여주고 해결 힌트를 냅니다.
 
 ### 이력·검색
 
