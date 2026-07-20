@@ -77,6 +77,7 @@ class CchubApp(App):
         Binding("s", "skills", "스킬"),
         Binding("r", "collect_results", "결과수집"),
         Binding("A", "brief", "브리핑"),
+        Binding("x", "copy_detail", "복사"),
     ]
 
     _STATE_MARK = {"working": "●", "waiting": "◌", "idle": "▶", "unknown": "?"}
@@ -354,6 +355,14 @@ class CchubApp(App):
             f"아래 프롬프트를 로컬 Claude Code 세션에 붙여넣으세요:\n\n{prompt}"
         )
         self.notify(f"브리핑 생성: {path.name}")
+
+    def action_copy_detail(self) -> None:
+        text = self.panes[self.active].text
+        if not text.strip():
+            self.notify("복사할 내용이 없습니다 — 세션을 먼저 선택하세요", severity="warning")
+            return
+        self.copy_to_clipboard(text)
+        self.notify(f"클립보드로 복사됨 ({len(text)}자)")
 
     def open_transcript(self, server: str, session_id: str) -> None:
         # 로컬 sqlite 조회는 ms 단위 — 워커 불필요

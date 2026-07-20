@@ -505,3 +505,15 @@ async def test_pane_state_backs_legacy_attrs(tmp_path):
         assert app.panes[0].follow_on is True
         app._write_detail("내용 확인")
         assert app.panes[0].text == "내용 확인"
+
+
+async def test_x_copies_active_pane_text(tmp_path, monkeypatch):
+    app = make_app(tmp_path)
+    copied = []
+    async with app.run_test() as pilot:
+        monkeypatch.setattr(app, "copy_to_clipboard", lambda t: copied.append(t))
+        await pilot.press("x")            # 내용 없음 → 복사 안 됨
+        assert copied == []
+        app._write_detail("복사할 내용")
+        await pilot.press("x")
+        assert copied == ["복사할 내용"]
