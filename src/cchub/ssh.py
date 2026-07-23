@@ -27,6 +27,16 @@ def _control_socket_dir() -> Path:
     return d
 
 
+def render_remote_path(path: str) -> str:
+    """원격 셸 명령에 넣을 경로 렌더링. ~는 원격 $HOME으로 확장되게, 그 외는 인용."""
+    if path == "~":
+        return '"$HOME"'
+    if path.startswith("~/"):
+        rest = path[2:]
+        return '"$HOME"/' + shlex.quote(rest) if rest else '"$HOME"'
+    return shlex.quote(path)
+
+
 @dataclass
 class RunResult:
     rc: int

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import shlex
 from dataclasses import dataclass
 
-from cchub.ssh import Remote
+from cchub.ssh import Remote, render_remote_path
 
 
 @dataclass
@@ -29,13 +28,7 @@ def _classify_ssh_error(stderr: str) -> str:
 
 def _projects_check_script(claude_dir: str) -> str:
     # claude_dir 의 ~ 는 원격 $HOME 으로 확장
-    if claude_dir == "~":
-        base = '"$HOME"'
-    elif claude_dir.startswith("~/"):
-        base = '"$HOME"/' + shlex.quote(claude_dir[2:])
-    else:
-        base = shlex.quote(claude_dir)
-    return f'test -d {base}/projects'
+    return f"test -d {render_remote_path(claude_dir)}/projects"
 
 
 def diagnose_server(remote: Remote, name: str, host: str,
