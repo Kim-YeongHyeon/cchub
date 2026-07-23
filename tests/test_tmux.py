@@ -135,3 +135,24 @@ def test_spawn_prompt_poll_timeout():
     assert len(slept) == 3                   # 매 실패마다 sleep
     assert not any(c == ["tmux", "send-keys", "-t", "%9", "-l", "--", "버그 고쳐줘"]
                    for c in fake.calls)
+
+
+def test_spawn_launch_injection_failure_without_prompt():
+    fake = FakeRemote({("tmux", "send-keys"): RunResult(1, "", "no such target")})
+    res = spawn_session(fake, "~", "claude", name="cchub-2")
+    assert res.ok is True                    # 세션 생성은 성공 기준
+    assert "주입 실패" in res.error
+    assert res.prompt_sent is None           # 프롬프트 미요청
+    # -l 주입이 실패하면 Enter 전송은 시도하지 않음 (단락)
+    sends = [c for c in fake.calls if c[:2] == ["tmux", "send-keys"]]
+    assert sends == [["tmux", "send-keys", "-t", "cchub-2", "-l", "--", "claude"]]
+
+
+def test_spawn_launch_injection_failure_with_prompt():
+    fake = FakeRemote({("tmux", "send-keys"): RunResult(1, "", "no such target")})
+    slept = []
+    res = spawn_session(fake, "~", "claude", name="cchub-2",
+                        prompt="버그 고쳐줘", sleep=slept.append)
+    assert res.ok is True and "주입 실패" in res.error
+    assert res.prompt_sent is False          # 프롬프트 요청했으나 미전달
+    assert slept == []                       # 폴링 진입 전에 반환
