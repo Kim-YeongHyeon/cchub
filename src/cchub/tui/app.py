@@ -21,7 +21,7 @@ from cchub.results import collect_results
 from cchub.sessions import LiveSession
 from cchub.ssh import SSHRemote
 from cchub.tui.data import RemoteFactory, ServerSnapshot, collect_sessions
-from cchub.tui.screens import SearchScreen, HistoryScreen, SkillsScreen
+from cchub.tui.screens import SearchScreen, HistoryScreen, SkillsScreen, SpawnScreen
 
 
 class ConfirmSend(ModalScreen[bool]):
@@ -82,6 +82,7 @@ class CchubApp(App):
         Binding("x", "copy_detail", "복사"),
         Binding("vertical_line", "toggle_split", "분할"),
         Binding("o", "switch_pane", "패널전환"),
+        Binding("N", "spawn", "새세션"),
     ]
 
     _STATE_MARK = {"working": "●", "waiting": "◌", "idle": "▶", "unknown": "?"}
@@ -170,7 +171,7 @@ class CchubApp(App):
         tree.root.expand()
         for name, s in snaps.items():
             label = f"{name}  ⚠ {s.error}" if s.error else name
-            node = tree.root.add(label, expand=True)
+            node = tree.root.add(label, expand=True, data=name)
             for ls in s.sessions:
                 mark = self._STATE_MARK.get(ls.state, "?")
                 node.add_leaf(f"{ls.number} {mark} {ls.project}  {ls.title}", data=ls)
@@ -205,7 +206,7 @@ class CchubApp(App):
                 state.session = None
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
-        if event.node.data is not None:
+        if isinstance(event.node.data, LiveSession):
             self.selected = event.node.data
         self.show_detail()
 
@@ -402,6 +403,50 @@ class CchubApp(App):
             return
         self.active = 1 - self.active
         self._update_active_classes()
+
+    def action_spawn(self) -> None:
+        node = self.query_one("#tree", Tree).cursor_node
+        data = node.data if node else None
+        if isinstance(data, LiveSession):
+            server = data.server
+        elif isinstance(data, str):
+            server = data
+        else:
+            self.notify("서버를 선택하세요", severity="warning")
+            return
+
+        def _submitted(result: tuple[str, str] | None) -> None:
+            if result:
+                self.spawn_worker(server, result[0], result[1] or None)
+
+        self.push_screen(SpawnScreen(server), _submitted)
+
+    @work(thread=True, exclusive=True, group="spawn", exit_on_error=False)
+    def spawn_worker(self, server: str, cwd: str, prompt: str | None) -> None:
+        worker = get_current_worker()
+        s = self.cfg.servers.get(server)
+        if s is None:
+            return
+        try:
+            res = tmux.spawn_session(
+                self.remote_factory(s.host), cwd,
+                "claude --dangerously-skip-permissions", prompt=prompt)
+        except Exception as e:  # noqa: BLE001 - 원격 실패가 앱을 죽이면 안 됨
+            if not worker.is_cancelled:
+                self.call_from_thread(self.notify, f"세션 생성 오류: {e}",
+                                      severity="error")
+            return
+        if worker.is_cancelled:
+            return
+        if not res.ok:
+            self.call_from_thread(self.notify, f"세션 생성 실패: {res.error}",
+                                  severity="error")
+            return
+        msg = f"{server}: 세션 {res.name} 생성됨"
+        if res.prompt_sent is False:
+            msg += " (초기 프롬프트 미전달)"
+        self.call_from_thread(self.notify, msg)
+        self.call_from_thread(self.action_refresh)
 
     def _update_active_classes(self) -> None:
         split = len(self.panes) > 1

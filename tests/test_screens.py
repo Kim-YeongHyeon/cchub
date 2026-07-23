@@ -1,12 +1,12 @@
 import shutil
 from pathlib import Path
 
-from textual.widgets import DataTable, Input, RichLog
+from textual.widgets import DataTable, Input, RichLog, Tree
 
 from cchub.config import Config
 from cchub.index import SessionIndex
 from cchub.tui.app import CchubApp
-from cchub.tui.screens import SearchScreen, HistoryScreen, SkillsScreen
+from cchub.tui.screens import SearchScreen, HistoryScreen, SkillsScreen, SpawnScreen
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_transcript.jsonl"
 
@@ -183,3 +183,76 @@ async def test_s_on_skills_screen_does_not_stack(tmp_path):
         assert app.screen is first
         table = app.screen.query_one("#skills-table", DataTable)
         assert table.loading is False    # 고착 없음
+
+
+async def test_server_node_select_does_not_pollute_selected(tmp_path):
+    """서버 노드 선택이 self.selected를 문자열로 오염시키지 않는다 (회귀)."""
+    from types import SimpleNamespace
+    from cchub.sessions import LiveSession
+    from cchub.tui.data import ServerSnapshot
+
+    app = make_indexed_app(tmp_path)
+    async with app.run_test() as pilot:
+        ls = LiveSession(server="srv1", number=1, pane_id="%5", location="main:0.0",
+                         cwd="/home/u/proj", project="-home-u-proj",
+                         session_id="s-1", title="", state="idle")
+        app.apply_snapshots({"srv1": ServerSnapshot(server="srv1", sessions=[ls])})
+        app.selected = ls
+        app.on_tree_node_selected(SimpleNamespace(node=SimpleNamespace(data="srv1")))
+        assert app.selected is ls
+
+
+async def test_N_spawn_flow_from_server_node(tmp_path):
+    from cchub.config import ServerConfig
+    from cchub.tui.data import ServerSnapshot
+
+    app = make_indexed_app(tmp_path)
+    calls = []
+    async with app.run_test() as pilot:
+        app.cfg.servers["srv1"] = ServerConfig(name="srv1", host="u@h")
+        app.apply_snapshots({"srv1": ServerSnapshot(server="srv1", sessions=[])})
+        await pilot.pause()   # 트리 라인 캐시 계산 대기 (cursor_node 정확도)
+        tree = app.query_one("#tree", Tree)
+        tree.select_node(tree.root.children[0])          # 서버 노드
+        app.spawn_worker = lambda server, cwd, prompt: calls.append((server, cwd, prompt))
+        await pilot.press("N")
+        assert isinstance(app.screen, SpawnScreen)
+        app.screen.query_one("#spawn-cwd", Input).value = "~/proj"
+        await pilot.press("enter")                       # cwd 제출 → 프롬프트로 포커스
+        pr = app.screen.query_one("#spawn-prompt", Input)
+        assert pr.has_focus
+        pr.value = "버그 고쳐줘"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not isinstance(app.screen, SpawnScreen)
+        assert calls == [("srv1", "~/proj", "버그 고쳐줘")]
+
+
+async def test_N_spawn_empty_prompt_becomes_none(tmp_path):
+    from cchub.config import ServerConfig
+    from cchub.tui.data import ServerSnapshot
+
+    app = make_indexed_app(tmp_path)
+    calls = []
+    async with app.run_test() as pilot:
+        app.cfg.servers["srv1"] = ServerConfig(name="srv1", host="u@h")
+        app.apply_snapshots({"srv1": ServerSnapshot(server="srv1", sessions=[])})
+        await pilot.pause()   # 트리 라인 캐시 계산 대기 (cursor_node 정확도)
+        tree = app.query_one("#tree", Tree)
+        tree.select_node(tree.root.children[0])
+        app.spawn_worker = lambda server, cwd, prompt: calls.append((server, cwd, prompt))
+        await pilot.press("N")
+        await pilot.press("enter")                       # cwd 기본 ~ 제출
+        await pilot.press("enter")                       # 빈 프롬프트 제출
+        await pilot.pause()
+        assert calls == [("srv1", "~", None)]
+
+
+async def test_N_without_server_context_warns(tmp_path):
+    app = make_indexed_app(tmp_path)
+    notes = []
+    async with app.run_test() as pilot:
+        app.notify = lambda msg, **kw: notes.append(msg)
+        await pilot.press("N")
+        assert not isinstance(app.screen, SpawnScreen)
+        assert any("서버" in n for n in notes)

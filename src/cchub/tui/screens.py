@@ -4,7 +4,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input
+from textual.widgets import DataTable, Input, Static
 
 from cchub.index import SessionIndex, SessionRow
 from cchub.skills import SkillInfo
@@ -107,6 +107,42 @@ class HistoryScreen(ModalScreen[tuple[str, str] | None]):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         r = self._rows[event.cursor_row]
         self.dismiss((r.server, r.session_id))
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class SpawnScreen(ModalScreen[tuple[str, str] | None]):
+    """새 원격 claude 세션 생성 입력. (cwd, prompt)를 dismiss, 취소 시 None."""
+
+    CSS = """
+    SpawnScreen { align: center middle; }
+    #spawn-box { width: 70%; height: auto; background: $panel;
+                 border: solid $primary; padding: 1 2; }
+    """
+    BINDINGS = [Binding("escape", "close", "닫기")]
+
+    def __init__(self, server: str):
+        super().__init__()
+        self.server = server
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="spawn-box"):
+            yield Static(f"[{self.server}] 새 claude 세션", id="spawn-title")
+            yield Input(value="~", placeholder="작업 디렉토리 (기본 ~)", id="spawn-cwd")
+            yield Input(placeholder="초기 프롬프트 (없으면 비워두고 Enter)",
+                        id="spawn-prompt")
+
+    def on_mount(self) -> None:
+        self.query_one("#spawn-cwd", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()   # 메인 화면 #prompt로 버블링 금지 (do_send 오발사 방지)
+        if event.input.id == "spawn-cwd":
+            self.query_one("#spawn-prompt", Input).focus()
+            return
+        cwd = self.query_one("#spawn-cwd", Input).value.strip() or "~"
+        self.dismiss((cwd, self.query_one("#spawn-prompt", Input).value.strip()))
 
     def action_close(self) -> None:
         self.dismiss(None)
