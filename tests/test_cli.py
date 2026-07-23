@@ -396,6 +396,15 @@ def test_cmd_spawn_rejects_bad_or_taken_name(monkeypatch, capsys, tmp_path):
     assert "이미 존재" in capsys.readouterr().err
 
 
+def test_cmd_spawn_rejects_empty_name(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    monkeypatch.setattr(cli, "load_config", _spawn_cfg)
+    monkeypatch.setattr(cli, "_make_remote", lambda host: FakeRemote())
+    assert cli.main(["spawn", "srv1", "--name", ""]) == 1
+    assert "세션명" in capsys.readouterr().err
+
+
 def test_cmd_spawn_unknown_server(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
     from cchub import cli

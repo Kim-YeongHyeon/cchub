@@ -139,7 +139,7 @@ def cmd_spawn(args) -> int:
               file=sys.stderr)
         return 1
     remote = _make_remote(s.host)
-    if args.name:
+    if args.name is not None:
         if not _SESSION_NAME_RE.fullmatch(args.name):
             print("세션명은 [A-Za-z0-9_-]+ 만 허용됩니다", file=sys.stderr)
             return 1
