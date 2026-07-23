@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import sqlite3
 import sys
@@ -125,6 +126,38 @@ def cmd_doctor(_args) -> int:
             if r.status == "fail":
                 any_fail = True
     return 1 if any_fail else 0
+
+
+_SESSION_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def cmd_spawn(args) -> int:
+    cfg = load_config()
+    s = cfg.servers.get(args.server)
+    if not s:
+        print(f"알 수 없는 서버: {args.server} (설정: {', '.join(cfg.servers)})",
+              file=sys.stderr)
+        return 1
+    remote = _make_remote(s.host)
+    if args.name:
+        if not _SESSION_NAME_RE.fullmatch(args.name):
+            print("세션명은 [A-Za-z0-9_-]+ 만 허용됩니다", file=sys.stderr)
+            return 1
+        if args.name in tmux.list_session_names(remote):
+            print(f"이미 존재하는 세션명: {args.name}", file=sys.stderr)
+            return 1
+    launch = "claude" if args.safe else "claude --dangerously-skip-permissions"
+    res = tmux.spawn_session(remote, args.cwd, launch, name=args.name,
+                             prompt=args.prompt)
+    if not res.ok:
+        print(f"{args.server}: 세션 생성 실패 — {res.error}", file=sys.stderr)
+        return 1
+    print(f"{args.server}: 세션 {res.name} 생성됨 (cwd={args.cwd}) "
+          f"— tmux attach -t {res.name}")
+    if res.prompt_sent is False:
+        print("주의: 초기 프롬프트 미전달 — claude 기동 확인 실패, "
+              "attach 후 직접 입력하세요", file=sys.stderr)
+    return 0
 
 
 def cmd_list(_args) -> int:
@@ -412,6 +445,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="서버별 live 세션 목록")
     sub.add_parser("doctor", help="서버별 연결 진단 (SSH·rsync·projects·tmux)")
 
+    p = sub.add_parser("spawn", help="원격 tmux 세션 생성 + claude 기동")
+    p.add_argument("server")
+    p.add_argument("cwd", nargs="?", default="~", help="작업 디렉토리 (기본 ~)")
+    p.add_argument("--name", default=None, help="tmux 세션명 (기본: cchub-<n> 자동)")
+    p.add_argument("--safe", action="store_true",
+                   help="--dangerously-skip-permissions 없이 실행")
+    p.add_argument("--prompt", default=None, help="claude 기동 후 주입할 초기 프롬프트")
+
     p = sub.add_parser("send", help="세션에 프롬프트 전송")
     p.add_argument("server")
     p.add_argument("number", type=int)
@@ -452,8 +493,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     handler = {
-        "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "doctor": cmd_doctor, "send": cmd_send,
-        "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex, "tui": cmd_tui,
+        "init": cmd_init, "sync": cmd_sync, "list": cmd_list, "doctor": cmd_doctor, "spawn": cmd_spawn,
+        "send": cmd_send, "tail": cmd_tail, "search": cmd_search, "reindex": cmd_reindex, "tui": cmd_tui,
         "brief": cmd_brief, "results": cmd_results, "push": cmd_push, "skills": cmd_skills,
     }[args.cmd]
     try:

@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 
 from cchub import cli
+from cchub.config import Config, ServerConfig
 from cchub.ssh import RunResult
+from cchub.tmux import SpawnResult
 from conftest import FakeRemote
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_transcript.jsonl"
@@ -309,3 +311,95 @@ def test_cmd_sync_success_no_doctor_hint(monkeypatch, capsys, tmp_path):
     err = capsys.readouterr().err
     assert rc == 0
     assert "cchub doctor" not in err
+
+
+def _spawn_cfg():
+    return Config(sync_interval=30, stats_interval=2,
+                  servers={"srv1": ServerConfig(name="srv1", host="sudal")})
+
+
+def test_cmd_spawn_default_flags(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    monkeypatch.setattr(cli, "load_config", _spawn_cfg)
+    monkeypatch.setattr(cli, "_make_remote", lambda host: FakeRemote())
+    captured = {}
+
+    def fake_spawn(remote, cwd, launch_cmd, name=None, prompt=None):
+        captured.update(cwd=cwd, launch=launch_cmd, name=name, prompt=prompt)
+        return SpawnResult(ok=True, name="cchub-1")
+
+    monkeypatch.setattr(cli.tmux, "spawn_session", fake_spawn)
+    rc = cli.main(["spawn", "srv1"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert captured == {"cwd": "~", "launch": "claude --dangerously-skip-permissions",
+                        "name": None, "prompt": None}
+    assert "cchub-1" in out and "tmux attach -t cchub-1" in out
+
+
+def test_cmd_spawn_safe_name_prompt(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    monkeypatch.setattr(cli, "load_config", _spawn_cfg)
+    monkeypatch.setattr(cli, "_make_remote", lambda host: FakeRemote())
+    captured = {}
+
+    def fake_spawn(remote, cwd, launch_cmd, name=None, prompt=None):
+        captured.update(cwd=cwd, launch=launch_cmd, name=name, prompt=prompt)
+        return SpawnResult(ok=True, name=name, prompt_sent=True)
+
+    monkeypatch.setattr(cli.tmux, "spawn_session", fake_spawn)
+    rc = cli.main(["spawn", "srv1", "~/proj", "--safe", "--name", "exp1",
+                   "--prompt", "테스트 돌려줘"])
+    assert rc == 0
+    assert captured == {"cwd": "~/proj", "launch": "claude",
+                        "name": "exp1", "prompt": "테스트 돌려줘"}
+
+
+def test_cmd_spawn_prompt_not_delivered_warns(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    monkeypatch.setattr(cli, "load_config", _spawn_cfg)
+    monkeypatch.setattr(cli, "_make_remote", lambda host: FakeRemote())
+    monkeypatch.setattr(cli.tmux, "spawn_session",
+                        lambda *a, **k: SpawnResult(ok=True, name="cchub-1",
+                                                    prompt_sent=False))
+    rc = cli.main(["spawn", "srv1", "--prompt", "x"])
+    err = capsys.readouterr().err
+    assert rc == 0                       # 세션 생성이 성공 기준
+    assert "미전달" in err
+
+
+def test_cmd_spawn_create_failure(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    monkeypatch.setattr(cli, "load_config", _spawn_cfg)
+    monkeypatch.setattr(cli, "_make_remote", lambda host: FakeRemote())
+    monkeypatch.setattr(cli.tmux, "spawn_session",
+                        lambda *a, **k: SpawnResult(ok=False, name="cchub-1",
+                                                    error="boom"))
+    rc = cli.main(["spawn", "srv1"])
+    err = capsys.readouterr().err
+    assert rc == 1 and "boom" in err
+
+
+def test_cmd_spawn_rejects_bad_or_taken_name(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    monkeypatch.setattr(cli, "load_config", _spawn_cfg)
+    fake = FakeRemote({("tmux", "list-sessions"): RunResult(0, "exp1\n", "")})
+    monkeypatch.setattr(cli, "_make_remote", lambda host: fake)
+    assert cli.main(["spawn", "srv1", "--name", "bad name!"]) == 1
+    assert "세션명" in capsys.readouterr().err
+    assert cli.main(["spawn", "srv1", "--name", "exp1"]) == 1
+    assert "이미 존재" in capsys.readouterr().err
+
+
+def test_cmd_spawn_unknown_server(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("CCHUB_DIR", str(tmp_path))
+    from cchub import cli
+    monkeypatch.setattr(cli, "load_config", _spawn_cfg)
+    rc = cli.main(["spawn", "srv9"])
+    assert rc == 1
+    assert "알 수 없는 서버" in capsys.readouterr().err
