@@ -2,7 +2,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from cchub.ssh import RunResult, SSHRemote
+from cchub.ssh import RunResult, SSHRemote, render_remote_path
 
 
 def _control_path(remote: SSHRemote) -> str:
@@ -127,3 +127,11 @@ def test_push_dir_sends_contents(monkeypatch, tmp_path):
     f.write_text("x")
     SSHRemote("u@h").push(f, "~/inbox")
     assert captured["cmd"][-2] == str(f)      # 파일 → 그대로
+
+
+def test_render_remote_path_variants():
+    assert render_remote_path("~") == '"$HOME"'
+    assert render_remote_path("~/proj") == '"$HOME"/proj'
+    assert render_remote_path("~/") == '"$HOME"'
+    assert render_remote_path("/abs/path") == "/abs/path"
+    assert render_remote_path("~/my dir") == '"$HOME"/' + "'my dir'"

@@ -53,6 +53,7 @@ $EDITOR ~/.cchub/config.toml   # 서버 추가 (아래 예시 참고)
 cchub sync                 # 모든 서버 미러링 + 인덱싱
 cchub list                 # 서버별 live 세션 목록
 cchub doctor               # (문제 시) 서버별 연결 진단
+cchub spawn srv1 ~/proj    # 원격에 새 tmux 세션 + claude 기동
 cchub tui                  # 또는 바로 TUI로
 ```
 
@@ -108,6 +109,28 @@ cchub doctor                      # 서버별 SSH·rsync·projects·tmux 점검,
 
 sync가 실패하면 `cchub doctor`가 서버별로 무엇이 막혔는지(키 기반 SSH 미설정,
 포트 불일치, rsync 미설치, claude_dir 경로 등) ✓/✗/⚠로 보여주고 해결 힌트를 냅니다.
+
+### 원격 세션 생성 (spawn)
+
+```bash
+cchub spawn srv1                          # $HOME에서 detached tmux 세션 + claude 기동
+cchub spawn srv1 ~/proj                   # 작업 디렉토리 지정 (~는 원격 $HOME 기준)
+cchub spawn srv1 ~/proj --name exp1       # tmux 세션명 지정 (기본: cchub-1, cchub-2, …)
+cchub spawn srv1 ~/proj --safe            # --dangerously-skip-permissions 없이 실행
+cchub spawn srv1 ~/proj --prompt "테스트 전부 돌리고 실패 원인 정리해줘"
+```
+
+- 기본으로 `claude --dangerously-skip-permissions`를 실행합니다 — 원격에서 무인
+  자동화가 목적이므로 권한 확인 프롬프트를 건너뜁니다. 신뢰할 수 없는 작업이면
+  `--safe`로 일반 `claude`를 실행하세요.
+- `--prompt`를 주면 claude가 뜰 때까지(pane 명령이 claude/node가 될 때까지, 최대
+  ~10초) 폴링한 뒤 주입합니다. 시간 안에 못 뜨면 세션은 만들어진 채 경고만 출력
+  합니다 — `tmux attach` 후 직접 입력하세요.
+- 생성 확인은 tmux 세션까지입니다. 서버에서 직접 보려면:
+  `ssh <서버> -t tmux attach -t <세션명>`.
+- 세션명은 `[A-Za-z0-9_-]+`만 허용되며, 이미 있는 이름은 거부됩니다.
+- TUI에서는 `N` 키 — 트리에서 서버(또는 그 서버의 세션)를 선택한 뒤 누르면 작업
+  디렉토리와 초기 프롬프트를 입력하는 모달이 뜹니다.
 
 ### 이력·검색
 
@@ -196,6 +219,7 @@ cchub skills delete srv1 old-skill         # 개인 skill 삭제 (이름 재입�
 | `\|` | 상세 패널 2분할 토글 — 두 세션을 나란히 볼 수 있음 |
 | `o` | 분할 상태에서 활성 패널 전환 — 활성 패널은 테두리로 강조되고, 세션 선택/전송/`f`/`t`/`x`는 항상 활성 패널을 대상으로 동작 |
 | `x` | 활성 패널 내용을 클립보드로 복사 (OSC 52) — live 화면이든 transcript든 현재 표시된 그대로 복사됨, 파일 저장 없음 |
+| `N` | 트리에서 서버를 선택한 뒤 새 원격 세션 생성 — 작업 디렉토리 + 초기 프롬프트 입력 모달 표시 |
 | `c` | CPU/메모리 바 토글 (끄면 폴링도 중단) |
 | `/` | 전 서버 FTS 검색 → 행 선택 시 해당 세션 transcript 표시 |
 | `h` | 전 서버 이력 타임라인 → 입력창으로 즉시 필터링 |

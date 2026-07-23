@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import shlex
+import time
 from dataclasses import dataclass
+from typing import Callable
 
-from cchub.ssh import Remote
+from cchub.ssh import Remote, render_remote_path
 
 _FMT = (
     "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}"
@@ -60,3 +63,66 @@ def confirm_delivery(remote: Remote, pane_id: str, text: str) -> bool:
     if not probe:
         return True
     return probe in capture(remote, pane_id, lines=50)
+
+
+@dataclass
+class SpawnResult:
+    ok: bool                         # tmux 세션 생성 성공 여부 (성공 기준)
+    name: str = ""                   # 실제 세션명
+    prompt_sent: bool | None = None  # None=프롬프트 미요청, True/False=전달 여부
+    error: str = ""
+
+
+def list_session_names(remote: Remote) -> list[str]:
+    """tmux 세션명 목록. 서버 미기동/미설치 시 []."""
+    r = remote.run(["tmux", "list-sessions", "-F", "#{session_name}"])
+    if r.rc != 0:
+        return []
+    return [ln for ln in r.out.splitlines() if ln]
+
+
+def spawn_session(
+    remote: Remote,
+    cwd: str,
+    launch_cmd: str,
+    name: str | None = None,
+    prompt: str | None = None,
+    poll_attempts: int = 20,
+    poll_interval: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
+) -> SpawnResult:
+    """detached tmux 세션 생성 + launch_cmd 기동 (+ 선택적 초기 프롬프트).
+
+    성공 기준은 세션 생성. prompt는 pane command가 claude 계열이 될 때까지
+    폴링한 뒤 전송하며, 타임아웃이어도 세션은 성공으로 본다 (prompt_sent=False).
+    """
+    if name is None:
+        existing = set(list_session_names(remote))
+        n = 1
+        while f"cchub-{n}" in existing:
+            n += 1
+        name = f"cchub-{n}"
+    r = remote.run([
+        "sh", "-c",
+        f"tmux new-session -d -s {shlex.quote(name)} -c {render_remote_path(cwd)}",
+    ])
+    if r.rc != 0:
+        return SpawnResult(ok=False, name=name, error=r.err.strip())
+    if (remote.run(["tmux", "send-keys", "-t", name, "-l", "--", launch_cmd]).rc != 0
+            or remote.run(["tmux", "send-keys", "-t", name, "Enter"]).rc != 0):
+        return SpawnResult(ok=True, name=name,
+                           prompt_sent=False if prompt is not None else None,
+                           error="claude 실행 명령 주입 실패")
+    if prompt is None:
+        return SpawnResult(ok=True, name=name)
+    for _ in range(poll_attempts):
+        pane = next(
+            (p for p in list_panes(remote)
+             if p.location.startswith(f"{name}:") and p.command in CLAUDE_COMMANDS),
+            None,
+        )
+        if pane is not None:
+            return SpawnResult(ok=True, name=name,
+                               prompt_sent=send_prompt(remote, pane.pane_id, prompt))
+        sleep(poll_interval)
+    return SpawnResult(ok=True, name=name, prompt_sent=False)
